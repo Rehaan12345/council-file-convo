@@ -1,0 +1,51 @@
+.starters {
+  padding: 16px 0 8px;
+}
+
+.starters-label {
+  font-size: 13px;
+  color: #888;
+  margin-bottom: 10px;
+}
+
+.starters-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.starter-chip {
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 20px;
+  padding: 8px 14px;
+  font-size: 14px;
+  color: #333;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  text-align: left;
+}
+
+.starter-chip:hover {
+  background: #f0f0f0;
+  border-color: #bbb;
+}
+
+/* ─── Responsive ─────────────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  .starters {
+    padding: 12px 0 6px;
+  }
+
+  .starters-grid {
+    gap: 6px;
+    flex-direction: column; /* stack chips vertically on narrow screens */
+  }
+
+  .starter-chip {
+    font-size: 14px;
+    padding: 10px 14px;
+    border-radius: 14px;
+    width: 100%;
+  }
+}

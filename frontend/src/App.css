@@ -1,0 +1,793 @@
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh; /* dynamic viewport — handles mobile browser chrome correctly */
+  background: #f5f5f5;
+}
+
+/* Header */
+.app-header {
+  background: #fff;
+  border-bottom: 1px solid #e8e8e8;
+  padding: 16px 32px 14px;
+  flex-shrink: 0;
+}
+
+.header-inner {
+  width: 100%;
+}
+
+.header-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.header-text {
+  min-width: 0;
+}
+
+.header-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.header-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.header-subtitle {
+  font-size: 13px;
+  color: #888;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Legislation tab bar */
+.leg-tabs {
+  display: flex;
+  gap: 4px;
+  margin-top: 12px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: none; /* Firefox */
+}
+
+.leg-tabs::-webkit-scrollbar {
+  display: none; /* Chrome/Safari */
+}
+
+.leg-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 1px solid #e8e8e8;
+  background: #fafafa;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  text-align: left;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.leg-tab:hover {
+  background: #f0f0f0;
+  border-color: #ccc;
+}
+
+.leg-tab--active {
+  background: #fff;
+  border-color: #1a1a1a;
+  border-bottom: 2px solid #1a1a1a;
+}
+
+.leg-tab--active:hover {
+  background: #fff;
+}
+
+.leg-tab-id {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.leg-tab--active .leg-tab-id {
+  color: #1a1a1a;
+}
+
+.leg-tab:not(.leg-tab--active) .leg-tab-id {
+  color: #666;
+}
+
+.leg-tab-desc {
+  font-size: 11px;
+  color: #999;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Branch badge on tab */
+.leg-tab-branch-badge {
+  font-size: 10px;
+  font-weight: 600;
+  color: #fff;
+  background: #555;
+  border-radius: 8px;
+  padding: 1px 5px;
+  margin-top: 1px;
+  align-self: flex-start;
+}
+
+/* Branch chevron button */
+.leg-tab-branch-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  border: 1px solid #e8e8e8;
+  border-left: none;
+  background: #fafafa;
+  color: #999;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.leg-tab-branch-btn:hover,
+.leg-tab-branch-btn--open {
+  background: #f0f0f0;
+  color: #333;
+}
+
+.leg-tab-wrap--active .leg-tab-branch-btn {
+  border-color: #1a1a1a;
+  border-bottom-width: 2px;
+}
+
+/* Context-inclusion checkbox on each tab */
+.leg-tab-check {
+  align-self: center;
+  margin: 0 0 0 6px;
+  width: 13px;
+  height: 13px;
+  accent-color: #1a1a1a;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+/* Tab wrapper so × and dropdown sit outside/below the tab button */
+.leg-tab-wrap {
+  display: flex;
+  align-items: stretch;
+  position: relative;
+  flex-shrink: 0;
+}
+
+/* Checked but not the primary tab — subtle highlight */
+.leg-tab-wrap--checked {
+  border-radius: 8px;
+  outline: 2px solid #1a1a1a44;
+  outline-offset: -1px;
+}
+
+.leg-tab-wrap .leg-tab {
+  border-right: none;
+  border-radius: 8px 0 0 8px;
+}
+
+.leg-tab-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  border: 1px solid #e8e8e8;
+  border-left: none;
+  border-radius: 0 8px 8px 0;
+  background: #fafafa;
+  color: #bbb;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.leg-tab-remove:hover {
+  background: #fff0f0;
+  color: #c00;
+}
+
+.leg-tab-wrap--active .leg-tab-remove {
+  border-color: #1a1a1a;
+  border-bottom-width: 2px;
+  background: #fff;
+}
+
+.leg-tab-wrap--active .leg-tab-remove:hover {
+  background: #fff0f0;
+  color: #c00;
+}
+
+/* Delete confirm state — replaces the tab in-place */
+.leg-tab--delete-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 10px;
+  background: #fff8f8;
+  border-color: #e55;
+  cursor: default;
+  min-width: 120px;
+}
+
+.leg-tab--delete-confirm:hover {
+  background: #fff8f8;
+  border-color: #e55;
+}
+
+.leg-tab-delete-prompt {
+  font-size: 12px;
+  color: #c00;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.leg-tab-delete-btns {
+  display: flex;
+  gap: 4px;
+}
+
+.leg-tab-delete-yes,
+.leg-tab-delete-no {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.leg-tab-delete-yes {
+  background: #c00;
+  color: #fff;
+  border-color: #c00;
+}
+
+.leg-tab-delete-yes:hover:not(:disabled) {
+  background: #a00;
+  border-color: #a00;
+}
+
+.leg-tab-delete-yes:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.leg-tab-delete-no {
+  background: #fff;
+  color: #555;
+  border-color: #ddd;
+}
+
+.leg-tab-delete-no:hover:not(:disabled) {
+  background: #f0f0f0;
+}
+
+.leg-tab-delete-no:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Add council file form */
+.add-file-form {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.add-file-input {
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  width: 160px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.add-file-input:focus {
+  border-color: #999;
+}
+
+.add-file-input--error {
+  border-color: #e55;
+}
+
+.add-file-input:disabled {
+  opacity: 0.6;
+}
+
+.add-file-btn {
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid #ddd;
+  background: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  color: #333;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+
+.add-file-btn:hover:not(:disabled) {
+  background: #f0f0f0;
+  border-color: #bbb;
+}
+
+.add-file-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.add-file-error {
+  font-size: 12px;
+  color: #e55;
+  text-align: right;
+  margin: 0;
+}
+
+/* Branch dropdown panel — sits below the tab bar as a block */
+.branch-dropdown {
+  margin-top: 8px;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  overflow: hidden;
+}
+
+.branch-dropdown-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px 6px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.branch-dropdown-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.branch-dropdown-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.branch-dropdown-action {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid #e0e0e0;
+  background: #fafafa;
+  color: #555;
+  cursor: pointer;
+}
+
+.branch-dropdown-action:hover {
+  background: #f0f0f0;
+}
+
+.branch-dropdown-list {
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.branch-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  font-size: 13px;
+  color: #222;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.1s;
+}
+
+.branch-dropdown-item:hover {
+  background: #f5f5f5;
+}
+
+.branch-dropdown-item input[type="checkbox"] {
+  accent-color: #1a1a1a;
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+/* Branch confirm panel */
+.branch-confirm {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-top: 1px solid #f0f0f0;
+  background: #fffbea;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.branch-confirm-text {
+  font-size: 13px;
+  color: #444;
+  line-height: 1.5;
+}
+
+.branch-confirm-btns {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.branch-btn {
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: 1px solid #ddd;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.branch-btn--single {
+  background: #fff;
+  color: #333;
+}
+
+.branch-btn--single:hover {
+  background: #f0f0f0;
+  border-color: #bbb;
+}
+
+.branch-btn--all {
+  background: #1a1a1a;
+  color: #fff;
+  border-color: #1a1a1a;
+}
+
+.branch-btn--all:hover {
+  background: #333;
+  border-color: #333;
+}
+
+.branch-btn--cancel {
+  background: transparent;
+  color: #888;
+  border-color: transparent;
+}
+
+.branch-btn--cancel:hover {
+  color: #333;
+  background: #f0f0f0;
+  border-color: #ddd;
+}
+
+/* Ingest status bar */
+.ingest-status {
+  margin-top: 10px;
+  padding: 8px 0 0;
+  border-top: 1px solid #f0f0f0;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ingest-status--downloading,
+.ingest-status--indexing {
+  color: #555;
+}
+
+.ingest-status--done {
+  color: #2a7a2a;
+}
+
+.ingest-status--error {
+  color: #c00;
+}
+
+.ingest-status-icon {
+  font-size: 15px;
+}
+
+/* Chat area */
+.chat-area {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 32px 0;
+}
+
+.chat-inner {
+  width: 100%;
+  padding-bottom: 20px;
+}
+
+/* Welcome screen */
+.welcome {
+  padding: 24px 0 16px;
+}
+
+.welcome-text {
+  font-size: 15px;
+  color: #555;
+  line-height: 1.7;
+  margin-bottom: 20px;
+}
+
+/* Loading dots */
+.loading-bubble {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  padding: 14px 18px !important;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  background: #ccc;
+  border-radius: 50%;
+  animation: bounce 1.2s infinite;
+}
+
+.dot:nth-child(2) { animation-delay: 0.2s; }
+.dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes bounce {
+  0%, 80%, 100% { transform: translateY(0); opacity: 0.5; }
+  40% { transform: translateY(-6px); opacity: 1; }
+}
+
+/* Input area */
+.input-area {
+  background: #fff;
+  border-top: 1px solid #e8e8e8;
+  padding: 14px 32px;
+  flex-shrink: 0;
+}
+
+.input-inner {
+  width: 100%;
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.chat-input {
+  flex: 1;
+  resize: none;
+  border: 1px solid #ddd;
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-size: 15px;
+  font-family: inherit;
+  line-height: 1.5;
+  outline: none;
+  background: #fafafa;
+  transition: border-color 0.15s;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.chat-input:focus {
+  border-color: #999;
+  background: #fff;
+}
+
+.chat-input:disabled {
+  opacity: 0.6;
+}
+
+.send-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: none;
+  background: #1a1a1a;
+  color: #fff;
+  font-size: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.15s, opacity 0.15s;
+}
+
+.send-btn:hover:not(:disabled) {
+  background: #333;
+}
+
+.send-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* ─── Responsive ─────────────────────────────────────────────────────────── */
+
+/* Remove tap delay and highlight flash on all interactive elements */
+button, input, textarea, label {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Mobile (≤ 640px) */
+@media (max-width: 640px) {
+
+  /* ── Header ── */
+  .app-header {
+    padding: 12px 16px 10px;
+  }
+
+  /* Stack title and add-form vertically */
+  .header-top {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .header-title {
+    font-size: 15px;
+  }
+
+  .header-subtitle {
+    font-size: 12px;
+  }
+
+  /* Add-form stretches full width below the title */
+  .header-right {
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .add-file-form {
+    width: 100%;
+  }
+
+  .add-file-input {
+    flex: 1;
+    width: auto;
+    font-size: 16px; /* prevents iOS auto-zoom on focus */
+    min-width: 0;
+  }
+
+  .add-file-error {
+    text-align: left;
+  }
+
+  /* ── Tab bar ── */
+  .leg-tabs {
+    margin-top: 10px;
+    gap: 3px;
+  }
+
+  .leg-tab {
+    padding: 5px 9px;
+  }
+
+  .leg-tab-id {
+    font-size: 12px;
+  }
+
+  /* Hide per-tab subtitle on mobile — IDs alone fit better */
+  .leg-tab-desc {
+    display: none;
+  }
+
+  /* Wider touch targets for branch/remove buttons */
+  .leg-tab-branch-btn {
+    width: 26px;
+  }
+
+  .leg-tab-remove {
+    width: 26px;
+  }
+
+  .leg-tab-check {
+    margin-left: 4px;
+    width: 15px;
+    height: 15px;
+  }
+
+  /* Branch dropdown — taller touch targets in list */
+  .branch-dropdown-list {
+    max-height: 200px;
+  }
+
+  .branch-dropdown-item {
+    padding: 9px 12px;
+    font-size: 14px;
+  }
+
+  .branch-dropdown-item input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+  }
+
+  /* Branch confirm — stack buttons vertically */
+  .branch-confirm-btns {
+    flex-direction: column;
+  }
+
+  .branch-btn {
+    width: 100%;
+    padding: 9px 12px;
+    text-align: center;
+    font-size: 14px;
+  }
+
+  /* Ingest status */
+  .ingest-status {
+    font-size: 12px;
+    padding: 6px 0 0;
+  }
+
+  /* ── Chat area ── */
+  .chat-area {
+    padding: 16px 16px 0;
+  }
+
+  .chat-inner {
+    padding-bottom: 14px;
+  }
+
+  .welcome {
+    padding: 16px 0 10px;
+  }
+
+  .welcome-text {
+    font-size: 14px;
+    margin-bottom: 14px;
+  }
+
+  /* ── Input area ── */
+  .input-area {
+    padding: 10px 16px;
+  }
+
+  /* 16px prevents iOS from zooming in on text input focus */
+  .chat-input {
+    font-size: 16px;
+    padding: 9px 12px;
+    border-radius: 10px;
+  }
+
+  .send-btn {
+    width: 42px;
+    height: 42px;
+  }
+}

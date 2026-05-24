@@ -1,0 +1,35 @@
+# Environment / secrets
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# ChromaDB (large binary index — rebuild locally with ingest.py)
+backend/chroma_db/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Claude Code
+.claude/settings.local.json
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
