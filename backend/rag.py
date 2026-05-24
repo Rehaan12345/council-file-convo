@@ -1,4 +1,5 @@
 import hashlib
+import os
 from pathlib import Path
 
 import chromadb
@@ -7,7 +8,7 @@ from chromadb.utils import embedding_functions
 from llm import get_response
 from ingest import collection_name
 
-DB_PATH = Path(__file__).parent / "chroma_db"
+DB_PATH = Path(os.getenv("DB_PATH", str(Path(__file__).parent / "chroma_db")))
 TOP_K = 5
 
 _collections: dict = {}

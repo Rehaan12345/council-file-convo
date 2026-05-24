@@ -18,8 +18,8 @@ import anthropic
 import chromadb
 from chromadb.utils import embedding_functions
 
-META_PATH = Path(__file__).parent / "legislation_meta.json"
-DB_PATH   = Path(__file__).parent / "chroma_db"
+META_PATH = Path(os.getenv("META_PATH", str(Path(__file__).parent / "legislation_meta.json")))
+DB_PATH   = Path(os.getenv("DB_PATH",   str(Path(__file__).parent / "chroma_db")))
 
 # Seed values for council files that pre-exist before auto-generation was added.
 _SEEDS: dict[str, dict] = {

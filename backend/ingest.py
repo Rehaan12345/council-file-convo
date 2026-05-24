@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 DOCS_PATH = os.getenv("DOCS_PATH", "/Users/rehaananjaria/Visic/CouncilFiles")
-DB_PATH = Path(__file__).parent / "chroma_db"
+DB_PATH = Path(os.getenv("DB_PATH", str(Path(__file__).parent / "chroma_db")))
 CHUNK_SIZE = 400  # words
 OVERLAP = 50      # words
 

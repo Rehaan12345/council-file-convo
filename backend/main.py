@@ -20,7 +20,7 @@ import chromadb
 load_dotenv()
 
 DOCS_PATH = Path(os.getenv("DOCS_PATH", "/Users/rehaananjaria/Visic/CouncilFiles"))
-DB_PATH = Path(__file__).parent / "chroma_db"
+DB_PATH = Path(os.getenv("DB_PATH", str(Path(__file__).parent / "chroma_db")))
 
 # Valid council file format: "17-0090" or "17-0090-S4"
 CF_PATTERN = re.compile(r"^\d{2}-\d{4}(-S\d+)?$")
@@ -58,9 +58,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Council File Chat API", lifespan=lifespan)
 
+_raw_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
+ALLOWED_ORIGINS = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],
 )

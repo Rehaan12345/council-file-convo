@@ -3,7 +3,7 @@ import Message, { type MessageData } from "./components/Message";
 import StarterQuestions from "./components/StarterQuestions";
 import "./App.css";
 
-const API_URL = "http://localhost:8000";
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 
 const CF_PATTERN = /^\d{2}-\d{4}(-S\d+)?$/;
