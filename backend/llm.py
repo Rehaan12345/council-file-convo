@@ -5,26 +5,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Per-legislation context injected into the system prompt
-LEGISLATION_CONTEXT = {
-    "17-0090": (
-        "Council File 17-0090 and all of its related sub-files (S1 through S33). "
-        "These documents cover affordable housing requirements, local hire initiatives, "
-        "and community development in South and Southeast Los Angeles."
-    ),
-    "24-0011": (
-        "Council File 24-0011 and all of its related sub-files (S1 through S35). "
-        "These documents cover street services, supplemental tree trimming, and "
-        "related Bureau of Street Services actions in Council District 3."
-    ),
-    "26-0900": (
-        "Council File 26-0900 and all of its related sub-files. "
-        "These documents cover street lighting assessment districts across multiple areas of Los Angeles. "
-        "They include ordinances establishing and modifying lighting districts, property owner ballot "
-        "proceedings under California's Proposition 218, Board of Public Works notifications, and "
-        "weighted ballot processes that determine whether assessments are imposed on affected properties."
-    ),
-}
+def _get_context(legislation_id: str) -> str:
+    """Return the stored context blurb for a legislation, falling back to a generic one."""
+    from legislation_meta import get_meta
+    m = get_meta(legislation_id)
+    if m and m.get("context"):
+        return m["context"]
+    return f"Council File {legislation_id}."
 
 SYSTEM_PROMPT_TEMPLATE = """You are a helpful assistant for LA City {context}
 
@@ -51,11 +38,9 @@ Only return the JSON — no extra text before or after it."""
 
 def _system_prompt(legislations: list[str]) -> str:
     if len(legislations) == 1:
-        context = LEGISLATION_CONTEXT.get(legislations[0], f"Council File {legislations[0]}.")
+        context = _get_context(legislations[0])
     else:
-        parts = []
-        for leg in legislations:
-            parts.append(LEGISLATION_CONTEXT.get(leg, f"Council File {leg}"))
+        parts = [_get_context(leg) for leg in legislations]
         ids = ", ".join(legislations)
         context = f"Council Files {ids}. " + " | ".join(parts)
     return SYSTEM_PROMPT_TEMPLATE.format(context=context)

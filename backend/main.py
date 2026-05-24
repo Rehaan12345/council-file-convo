@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 
 import rag
 import downloader
+import legislation_meta as leg_meta
 from ingest import ingest_legislation, collection_name
 from chromadb.utils import embedding_functions
 import chromadb
@@ -43,6 +44,7 @@ async def _auto_ingest_missing():
             print(f"[startup] Auto-ingesting {folder.name}...")
             count = ingest_legislation(folder, client, ef)
             print(f"[startup] ✓ {folder.name} — {count} chunks indexed")
+            leg_meta.ensure_meta(folder.name)
     except Exception as e:
         print(f"[startup] WARNING: auto-ingest failed: {e}")
 
@@ -144,6 +146,7 @@ async def _run_ingest(job_id: str, council_file: str, load_all_branches: bool = 
                 f"across {last_branch} branches of {base_file}"
             )
             print(f"[ingest-job:{job_id}] Done. {chunks_indexed} chunks, {last_branch} branches.")
+            leg_meta.generate_and_save_meta(base_file)
 
         # ── Single-file flow ───────────────────────────────────────────────────
         else:
@@ -169,6 +172,7 @@ async def _run_ingest(job_id: str, council_file: str, load_all_branches: bool = 
             job["status"] = "done"
             job["message"] = f"Ready — {chunks_indexed} chunks indexed from {pdf_count} PDFs"
             print(f"[ingest-job:{job_id}] Done. {chunks_indexed} chunks indexed.")
+            leg_meta.generate_and_save_meta(council_file)
 
     except Exception as e:
         job["status"] = "error"
@@ -188,8 +192,13 @@ def health():
 
 @app.get("/api/legislations")
 def list_legislations():
-    """Return all available legislations and their chunk counts."""
+    """Return all available legislations with chunk counts and display metadata."""
     legislations = rag.get_available_legislations()
+    meta = leg_meta.load_meta()
+    for leg in legislations:
+        m = meta.get(leg["id"], {})
+        leg["subtitle"] = m.get("subtitle", "")
+        leg["starters"] = m.get("starters", [])
     print(f"[legislations] Returning {len(legislations)} legislations")
     return legislations
 

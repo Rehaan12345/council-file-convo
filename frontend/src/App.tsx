@@ -5,27 +5,14 @@ import "./App.css";
 
 const API_URL = "http://localhost:8000";
 
-// Known legislations get a nice title/subtitle; unknown ones show the ID.
-const LEGISLATION_META: Record<string, { title: string; subtitle: string }> = {
-  "17-0090": {
-    title: "Council File 17-0090",
-    subtitle: "Affordable housing & local hire — South & Southeast Los Angeles",
-  },
-  "24-0011": {
-    title: "Council File 24-0011",
-    subtitle: "Street services & tree trimming — Council District 3",
-  },
-  "26-0900": {
-    title: "Council File 26-0900",
-    subtitle: "Street lighting assessment districts — Los Angeles",
-  },
-};
 
 const CF_PATTERN = /^\d{2}-\d{4}(-S\d+)?$/;
 
 interface Legislation {
   id: string;
   chunks: number;
+  subtitle?: string;
+  starters?: string[];
 }
 
 interface IngestJob {
@@ -304,13 +291,14 @@ export default function App() {
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
 
   // ── Render ─────────────────────────────────────────────────────────────────
-  const meta = LEGISLATION_META[primaryLeg] ?? {
+  const primaryLegData = legislations.find((l) => l.id === primaryLeg);
+  const meta = {
     title: contextLegs.length > 1
       ? `${contextLegs.length} council files`
       : `Council File ${primaryLeg}`,
     subtitle: contextLegs.length > 1
       ? contextLegs.join(" · ")
-      : "LA City Council legislation",
+      : (primaryLegData?.subtitle || "LA City Council legislation"),
   };
   const showStarters = messages.length === 0 && !loading;
 
@@ -351,7 +339,6 @@ export default function App() {
             <div ref={tabsAreaRef}>
               <div className="leg-tabs">
                 {legislations.map((leg) => {
-                  const knownMeta = LEGISLATION_META[leg.id];
                   const isPrimary = primaryLeg === leg.id;
                   const inContext = contextLegs.includes(leg.id);
                   const isPendingDelete = deleteConfirm === leg.id;
@@ -404,8 +391,8 @@ export default function App() {
                         title={`${leg.chunks.toLocaleString()} chunks indexed`}
                       >
                         <span className="leg-tab-id">{leg.id}</span>
-                        {knownMeta && (
-                          <span className="leg-tab-desc">{knownMeta.subtitle}</span>
+                        {leg.subtitle && (
+                          <span className="leg-tab-desc">{leg.subtitle}</span>
                         )}
                         {hasBranches && selected.length > 0 && (
                           <span className="leg-tab-branch-badge">{selected.length}/{branches.length}</span>
@@ -547,7 +534,7 @@ export default function App() {
                   : "Ask me anything about this legislation. I'll answer in plain language and tell you exactly which document my answer comes from."
                 }
               </p>
-              <StarterQuestions legislation={primaryLeg} onSelect={sendQuestion} />
+              <StarterQuestions starters={primaryLegData?.starters} onSelect={sendQuestion} />
             </div>
           )}
 
