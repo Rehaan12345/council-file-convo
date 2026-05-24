@@ -360,7 +360,8 @@ async def parse_hot_sheet(req: HotSheetRequest):
     try:
         result = await hs.fetch_and_parse(url)
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Could not fetch hot sheet: {e}")
+        print(f"[hot-sheet] ERROR {type(e).__name__}: {e}")
+        raise HTTPException(status_code=400, detail=f"Could not fetch hot sheet: {e or type(e).__name__}")
 
     entries = result["entries"]
     print(f"[hot-sheet] Found {len(entries)} entries, date='{result['date']}'")

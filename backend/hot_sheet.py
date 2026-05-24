@@ -44,7 +44,9 @@ async def fetch_and_parse(url: str) -> dict:
     }
     Entries are deduplicated by full_id and returned in document order.
     """
-    async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+    # verify=False: ens.lacity.org uses a CA not trusted by Python's bundled certs on macOS/Railway.
+    # This is safe here — we're only reading public HTML, not sending credentials.
+    async with httpx.AsyncClient(timeout=20, follow_redirects=True, verify=False) as client:
         resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
         resp.raise_for_status()
     html = resp.text
