@@ -638,6 +638,318 @@
   cursor: default;
 }
 
+/* ─── Hot Sheet ──────────────────────────────────────────────────────────── */
+
+/* Header actions row: add-form + hot sheet button side by side */
+.header-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.hot-sheet-toggle-btn {
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid #ddd;
+  background: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  color: #333;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+
+.hot-sheet-toggle-btn:hover {
+  background: #f0f0f0;
+  border-color: #bbb;
+}
+
+.hot-sheet-toggle-btn--active {
+  background: #1a1a1a;
+  color: #fff;
+  border-color: #1a1a1a;
+}
+
+.hot-sheet-toggle-btn--active:hover {
+  background: #333;
+  border-color: #333;
+}
+
+/* Panel */
+.hot-sheet-panel {
+  margin-top: 10px;
+  padding: 12px;
+  background: #f8f8f8;
+  border: 1px solid #e4e4e4;
+  border-radius: 10px;
+}
+
+.hot-sheet-url-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.hot-sheet-url-input {
+  flex: 1;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  min-width: 0;
+  background: #fff;
+  transition: border-color 0.15s;
+}
+
+.hot-sheet-url-input:focus {
+  border-color: #999;
+}
+
+.hot-sheet-url-input:disabled {
+  opacity: 0.6;
+}
+
+.hot-sheet-parse-btn {
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid #1a1a1a;
+  background: #1a1a1a;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+
+.hot-sheet-parse-btn:hover:not(:disabled) {
+  background: #333;
+}
+
+.hot-sheet-parse-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.hot-sheet-close-btn {
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid #ddd;
+  background: #fff;
+  color: #888;
+  font-size: 13px;
+  cursor: pointer;
+  line-height: 1;
+  transition: background 0.15s, color 0.15s;
+}
+
+.hot-sheet-close-btn:hover {
+  background: #f0f0f0;
+  color: #333;
+}
+
+.hot-sheet-error {
+  font-size: 12px;
+  color: #c00;
+  margin: 6px 0 0;
+}
+
+/* Results area */
+.hot-sheet-results {
+  margin-top: 10px;
+}
+
+.hot-sheet-summary {
+  font-size: 12px;
+  font-weight: 600;
+  color: #555;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.hot-sheet-entries {
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid #e4e4e4;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.hot-sheet-group {
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.hot-sheet-group:last-child {
+  border-bottom: none;
+}
+
+.hot-sheet-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.hot-sheet-group-header--indexed {
+  background: #f0faf0;
+  color: #2a7a2a;
+  border-bottom: 1px solid #d8f0d8;
+}
+
+.hot-sheet-group-header--unindexed {
+  background: #f8f8f8;
+  color: #888;
+  border-bottom: 1px solid #efefef;
+}
+
+.hot-sheet-selectall {
+  font-size: 11px;
+  font-weight: 400;
+  color: #2a7a2a;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.hot-sheet-selectall:hover {
+  color: #1a5a1a;
+}
+
+/* Individual entry row */
+.hot-sheet-entry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.1s;
+  border-bottom: 1px solid #f5f5f5;
+}
+
+.hot-sheet-entry:last-child {
+  border-bottom: none;
+}
+
+.hot-sheet-entry:hover {
+  background: #fafafa;
+}
+
+.hot-sheet-entry--unindexed {
+  cursor: default;
+  color: #888;
+}
+
+.hot-sheet-entry--done {
+  color: #222;
+  cursor: pointer;
+}
+
+.hot-sheet-entry input[type="checkbox"] {
+  accent-color: #1a1a1a;
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.hot-sheet-entry-id {
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+  color: #1a1a1a;
+}
+
+.hot-sheet-entry--unindexed .hot-sheet-entry-id {
+  color: #aaa;
+}
+
+.hot-sheet-entry-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #555;
+  font-size: 12px;
+}
+
+.hot-sheet-load-btn {
+  flex-shrink: 0;
+  padding: 3px 8px;
+  border-radius: 5px;
+  border: 1px solid #ccc;
+  background: #fff;
+  font-size: 12px;
+  font-weight: 500;
+  color: #444;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.hot-sheet-load-btn:hover {
+  background: #f0f0f0;
+  border-color: #aaa;
+}
+
+.hot-sheet-job-status {
+  flex-shrink: 0;
+  font-size: 12px;
+  white-space: nowrap;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hot-sheet-job-status--done    { color: #2a7a2a; }
+.hot-sheet-job-status--error   { color: #c00; }
+.hot-sheet-job-status--downloading,
+.hot-sheet-job-status--indexing { color: #666; }
+
+/* Footer */
+.hot-sheet-footer {
+  margin-top: 10px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.hot-sheet-open-btn {
+  padding: 7px 14px;
+  border-radius: 8px;
+  border: 1px solid #1a1a1a;
+  background: #1a1a1a;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.hot-sheet-open-btn:hover:not(:disabled) {
+  background: #333;
+  border-color: #333;
+}
+
+.hot-sheet-open-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 /* ─── Responsive ─────────────────────────────────────────────────────────── */
 
 /* Remove tap delay and highlight flash on all interactive elements */
@@ -674,8 +986,26 @@ button, input, textarea, label {
     width: 100%;
   }
 
+  .header-actions {
+    flex-wrap: wrap;
+  }
+
   .add-file-form {
-    width: 100%;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .hot-sheet-toggle-btn {
+    font-size: 12px;
+    padding: 6px 10px;
+  }
+
+  .hot-sheet-url-input {
+    font-size: 16px; /* prevent iOS zoom */
+  }
+
+  .hot-sheet-entries {
+    max-height: 220px;
   }
 
   .add-file-input {

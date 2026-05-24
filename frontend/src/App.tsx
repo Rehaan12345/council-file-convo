@@ -21,6 +21,20 @@ interface IngestJob {
   message: string;
 }
 
+interface HotSheetEntry {
+  full_id: string;
+  base_file: string;
+  branch: string | null;
+  title: string;
+  indexed: boolean;
+}
+
+interface HotSheetJob {
+  job_id: string;
+  status: string;
+  message: string;
+}
+
 export default function App() {
   const [legislations, setLegislations] = useState<Legislation[]>([]);
   // primaryLeg: which tab drives the header title and starter questions
@@ -53,6 +67,18 @@ export default function App() {
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // ── Hot Sheet state ────────────────────────────────────────────────────────
+  const [hotSheetOpen, setHotSheetOpen] = useState(false);
+  const [hotSheetUrl, setHotSheetUrl] = useState("");
+  const [hotSheetDate, setHotSheetDate] = useState("");
+  const [hotSheetEntries, setHotSheetEntries] = useState<HotSheetEntry[]>([]);
+  const [hotSheetSelected, setHotSheetSelected] = useState<Set<string>>(new Set());
+  const [hotSheetParsing, setHotSheetParsing] = useState(false);
+  const [hotSheetParseError, setHotSheetParseError] = useState("");
+  const [hotSheetIngestJobs, setHotSheetIngestJobs] = useState<Record<string, HotSheetJob>>({});
+  const hotSheetJobsRef = useRef<Record<string, HotSheetJob>>({});
+  const hotSheetPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ── Fetch available legislations from backend ──────────────────────────────
   const fetchLegislations = useCallback(async () => {
@@ -300,7 +326,142 @@ export default function App() {
   }
 
   // Cleanup polling on unmount
-  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+  useEffect(() => () => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    if (hotSheetPollRef.current) clearInterval(hotSheetPollRef.current);
+  }, []);
+
+  // ── Hot Sheet ──────────────────────────────────────────────────────────────
+  function updateHotSheetJob(fullId: string, update: Partial<HotSheetJob>) {
+    hotSheetJobsRef.current = {
+      ...hotSheetJobsRef.current,
+      [fullId]: { ...(hotSheetJobsRef.current[fullId] ?? { job_id: "", status: "", message: "" }), ...update },
+    };
+    setHotSheetIngestJobs({ ...hotSheetJobsRef.current });
+  }
+
+  async function pollHotSheetJobs() {
+    const jobs = hotSheetJobsRef.current;
+    const active = Object.entries(jobs).filter(([, j]) => j.status !== "done" && j.status !== "error");
+    if (active.length === 0) {
+      clearInterval(hotSheetPollRef.current!);
+      hotSheetPollRef.current = null;
+      return;
+    }
+    await Promise.all(
+      active.map(async ([fullId, job]) => {
+        try {
+          const res = await fetch(`${API_URL}/api/ingest/status/${job.job_id}`);
+          if (!res.ok) return;
+          const updated = await res.json();
+          updateHotSheetJob(fullId, { status: updated.status, message: updated.message });
+          if (updated.status === "done") {
+            // Mark entry as indexed and auto-select it
+            setHotSheetEntries((prev) =>
+              prev.map((e) => (e.full_id === fullId ? { ...e, indexed: true } : e))
+            );
+            setHotSheetSelected((prev) => new Set([...prev, fullId]));
+            fetchLegislations();
+          }
+        } catch { /* keep polling */ }
+      })
+    );
+  }
+
+  function startHotSheetPoll() {
+    if (hotSheetPollRef.current) return;
+    hotSheetPollRef.current = setInterval(pollHotSheetJobs, 2000);
+  }
+
+  async function handleHotSheetParse(e: React.FormEvent) {
+    e.preventDefault();
+    if (!hotSheetUrl.trim()) return;
+    setHotSheetParsing(true);
+    setHotSheetParseError("");
+    setHotSheetEntries([]);
+    setHotSheetSelected(new Set());
+    setHotSheetIngestJobs({});
+    hotSheetJobsRef.current = {};
+    try {
+      const res = await fetch(`${API_URL}/api/hot-sheet/parse`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: hotSheetUrl.trim() }),
+      });
+      if (!res.ok) {
+        const body = await res.json();
+        setHotSheetParseError(body.detail || "Failed to parse hot sheet");
+        return;
+      }
+      const data = await res.json();
+      setHotSheetDate(data.date || "");
+      const indexedSet = new Set<string>(data.indexed as string[]);
+      const entries: HotSheetEntry[] = (data.entries as HotSheetEntry[]).map((entry) => ({
+        ...entry,
+        indexed: indexedSet.has(entry.base_file),
+      }));
+      setHotSheetEntries(entries);
+      // Auto-select already-indexed entries
+      setHotSheetSelected(new Set(entries.filter((e) => e.indexed).map((e) => e.full_id)));
+    } catch {
+      setHotSheetParseError("Could not reach the server");
+    } finally {
+      setHotSheetParsing(false);
+    }
+  }
+
+  async function ingestHotSheetEntry(entry: HotSheetEntry) {
+    try {
+      const res = await fetch(`${API_URL}/api/ingest`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ council_file: entry.full_id, load_all_branches: false }),
+      });
+      if (!res.ok) {
+        const body = await res.json();
+        updateHotSheetJob(entry.full_id, { job_id: "", status: "error", message: body.detail || "Failed to start" });
+        return;
+      }
+      const { job_id } = await res.json();
+      updateHotSheetJob(entry.full_id, { job_id, status: "downloading", message: "Starting download…" });
+      startHotSheetPoll();
+    } catch {
+      updateHotSheetJob(entry.full_id, { job_id: "", status: "error", message: "Could not reach the server" });
+    }
+  }
+
+  function openHotSheetChat() {
+    const selectedEntries = hotSheetEntries.filter(
+      (e) => hotSheetSelected.has(e.full_id) && e.indexed
+    );
+    if (selectedEntries.length === 0) return;
+
+    const newContextLegs: string[] = [];
+    const newBranchSel: Record<string, string[]> = {};
+    for (const entry of selectedEntries) {
+      if (!newContextLegs.includes(entry.base_file)) {
+        newContextLegs.push(entry.base_file);
+      }
+      if (entry.branch) {
+        newBranchSel[entry.base_file] = [
+          ...(newBranchSel[entry.base_file] ?? []),
+          entry.branch,
+        ];
+      }
+    }
+
+    setContextLegs(newContextLegs);
+    setBranchSelection((prev) => ({ ...prev, ...newBranchSel }));
+    setPrimaryLeg(newContextLegs[0] ?? "");
+    setMessages([]);
+    setInput("");
+    setHotSheetOpen(false);
+  }
+
+  function closeHotSheet() {
+    setHotSheetOpen(false);
+    setHotSheetParseError("");
+  }
 
   // ── Render ─────────────────────────────────────────────────────────────────
   const primaryLegData = legislations.find((l) => l.id === primaryLeg);
@@ -330,18 +491,28 @@ export default function App() {
               <p className="header-subtitle">{meta.subtitle}</p>
             </div>
             <div className="header-right">
-              <form className="add-file-form" onSubmit={handleAddSubmit}>
-                <input
-                  className={`add-file-input${addError ? " add-file-input--error" : ""}`}
-                  placeholder="Add file… e.g. 22-0100"
-                  value={addInput}
-                  onChange={(e) => { setAddInput(e.target.value); setAddError(""); }}
-                  disabled={addLoading}
-                />
-                <button className="add-file-btn" type="submit" disabled={addLoading}>
-                  {addLoading ? "…" : "+ Add"}
+              <div className="header-actions">
+                <form className="add-file-form" onSubmit={handleAddSubmit}>
+                  <input
+                    className={`add-file-input${addError ? " add-file-input--error" : ""}`}
+                    placeholder="Add file… e.g. 22-0100"
+                    value={addInput}
+                    onChange={(e) => { setAddInput(e.target.value); setAddError(""); }}
+                    disabled={addLoading}
+                  />
+                  <button className="add-file-btn" type="submit" disabled={addLoading}>
+                    {addLoading ? "…" : "+ Add"}
+                  </button>
+                </form>
+                <button
+                  className={`hot-sheet-toggle-btn${hotSheetOpen ? " hot-sheet-toggle-btn--active" : ""}`}
+                  type="button"
+                  onClick={() => (hotSheetOpen ? closeHotSheet() : setHotSheetOpen(true))}
+                  title="Load from Hot Sheet URL"
+                >
+                  📋 Hot Sheet
                 </button>
-              </form>
+              </div>
               {addError && <p className="add-file-error">{addError}</p>}
             </div>
           </div>
@@ -498,6 +669,144 @@ export default function App() {
             </div>
           )}
         </div>
+
+        {/* ── Hot Sheet panel ── */}
+        {hotSheetOpen && (
+          <div className="hot-sheet-panel">
+            <form className="hot-sheet-url-row" onSubmit={handleHotSheetParse}>
+              <input
+                className="hot-sheet-url-input"
+                placeholder="Paste hot sheet URL…"
+                value={hotSheetUrl}
+                onChange={(e) => setHotSheetUrl(e.target.value)}
+                disabled={hotSheetParsing}
+              />
+              <button className="hot-sheet-parse-btn" type="submit" disabled={hotSheetParsing || !hotSheetUrl.trim()}>
+                {hotSheetParsing ? "Loading…" : "Parse"}
+              </button>
+              <button className="hot-sheet-close-btn" type="button" onClick={closeHotSheet}>✕</button>
+            </form>
+
+            {hotSheetParseError && <p className="hot-sheet-error">{hotSheetParseError}</p>}
+
+            {hotSheetEntries.length > 0 && (() => {
+              const indexedEntries = hotSheetEntries.filter((e) => e.indexed);
+              const unindexedEntries = hotSheetEntries.filter((e) => !e.indexed);
+              const readyCount = hotSheetEntries.filter(
+                (e) => hotSheetSelected.has(e.full_id) && e.indexed
+              ).length;
+              return (
+                <div className="hot-sheet-results">
+                  <div className="hot-sheet-summary">
+                    Found {hotSheetEntries.length} council files{hotSheetDate ? ` — ${hotSheetDate}` : ""}
+                  </div>
+
+                  <div className="hot-sheet-entries">
+                    {/* Already indexed */}
+                    {indexedEntries.length > 0 && (
+                      <div className="hot-sheet-group">
+                        <div className="hot-sheet-group-header hot-sheet-group-header--indexed">
+                          <span>✓ Already available ({indexedEntries.length})</span>
+                          <button
+                            className="hot-sheet-selectall"
+                            type="button"
+                            onClick={() =>
+                              setHotSheetSelected((prev) => {
+                                const next = new Set(prev);
+                                indexedEntries.forEach((e) => next.add(e.full_id));
+                                return next;
+                              })
+                            }
+                          >
+                            select all
+                          </button>
+                        </div>
+                        {indexedEntries.map((entry) => (
+                          <label key={entry.full_id} className="hot-sheet-entry">
+                            <input
+                              type="checkbox"
+                              checked={hotSheetSelected.has(entry.full_id)}
+                              onChange={() =>
+                                setHotSheetSelected((prev) => {
+                                  const next = new Set(prev);
+                                  next.has(entry.full_id) ? next.delete(entry.full_id) : next.add(entry.full_id);
+                                  return next;
+                                })
+                              }
+                            />
+                            <span className="hot-sheet-entry-id">{entry.full_id}</span>
+                            <span className="hot-sheet-entry-title">{entry.title}</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Not yet indexed */}
+                    {unindexedEntries.length > 0 && (
+                      <div className="hot-sheet-group">
+                        <div className="hot-sheet-group-header hot-sheet-group-header--unindexed">
+                          <span>⬇ Not yet indexed ({unindexedEntries.length})</span>
+                        </div>
+                        {unindexedEntries.map((entry) => {
+                          const job = hotSheetIngestJobs[entry.full_id];
+                          const isActive = job && job.status !== "done" && job.status !== "error";
+                          const isDone = entry.indexed;
+                          return (
+                            <div
+                              key={entry.full_id}
+                              className={`hot-sheet-entry hot-sheet-entry--unindexed${isDone ? " hot-sheet-entry--done" : ""}`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={hotSheetSelected.has(entry.full_id)}
+                                disabled={!isDone}
+                                onChange={() =>
+                                  setHotSheetSelected((prev) => {
+                                    const next = new Set(prev);
+                                    next.has(entry.full_id) ? next.delete(entry.full_id) : next.add(entry.full_id);
+                                    return next;
+                                  })
+                                }
+                              />
+                              <span className="hot-sheet-entry-id">{entry.full_id}</span>
+                              <span className="hot-sheet-entry-title">{entry.title}</span>
+                              {!job && !isDone && (
+                                <button
+                                  className="hot-sheet-load-btn"
+                                  type="button"
+                                  onClick={() => ingestHotSheetEntry(entry)}
+                                >
+                                  Load
+                                </button>
+                              )}
+                              {job && (
+                                <span className={`hot-sheet-job-status hot-sheet-job-status--${job.status}`}>
+                                  {job.status === "done" ? "✓" : job.status === "error" ? "✗" : "⏳"}{" "}
+                                  {isActive ? job.message : job.status === "done" ? "Ready" : job.message}
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="hot-sheet-footer">
+                    <button
+                      className="hot-sheet-open-btn"
+                      type="button"
+                      onClick={openHotSheetChat}
+                      disabled={readyCount === 0}
+                    >
+                      Open Chat with selected ({readyCount})
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        )}
 
         {branchConfirm && !addLoading && (
           <div className="branch-confirm">

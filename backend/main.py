@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 
 import rag
 import downloader
+import hot_sheet as hs
 import legislation_meta as leg_meta
 from ingest import ingest_legislation, collection_name
 from chromadb.utils import embedding_functions
@@ -84,6 +85,10 @@ class ChatResponse(BaseModel):
     answer: str
     sources: list[str]
     followups: list[str]
+
+
+class HotSheetRequest(BaseModel):
+    url: str
 
 
 class IngestRequest(BaseModel):
@@ -339,3 +344,46 @@ def chat(req: ChatRequest):
         sources=result.get("sources", []),
         followups=result.get("followups", []),
     )
+
+
+@app.post("/api/hot-sheet/parse")
+async def parse_hot_sheet(req: HotSheetRequest):
+    """
+    Fetch and parse a hot sheet URL.
+    Returns entries with indexed/unindexed classification.
+    """
+    url = req.url.strip()
+    if not url.startswith("http"):
+        raise HTTPException(status_code=400, detail="Invalid URL — must start with http(s)://")
+
+    print(f"\n[hot-sheet] Parsing {url}")
+    try:
+        result = await hs.fetch_and_parse(url)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not fetch hot sheet: {e}")
+
+    entries = result["entries"]
+    print(f"[hot-sheet] Found {len(entries)} entries, date='{result['date']}'")
+
+    # Cross-reference against indexed legislations
+    indexed_ids = {l["id"] for l in rag.get_available_legislations()}
+
+    # Preserve order while deduplicating
+    indexed: list[str] = []
+    unindexed: list[str] = []
+    seen_bases: set[str] = set()
+    for entry in entries:
+        base = entry["base_file"]
+        if base not in seen_bases:
+            seen_bases.add(base)
+            if base in indexed_ids:
+                indexed.append(base)
+            else:
+                unindexed.append(base)
+
+    return {
+        "date":      result["date"],
+        "entries":   entries,
+        "indexed":   indexed,
+        "unindexed": unindexed,
+    }
