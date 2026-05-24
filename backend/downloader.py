@@ -7,6 +7,7 @@ Supports two modes:
   - All branches: download_all_branches("26-0900", last_branch=15, ...)
                   → extracts each Sx into DOCS_PATH/26-0900/26-0900-Sx/
 """
+import asyncio
 import io
 import zipfile
 from pathlib import Path
@@ -17,7 +18,7 @@ SCRAPE_API = "https://scrape-cf.vercel.app"
 
 
 async def probe_branch_exists(base_file: str, n: int) -> bool:
-    """Return True if 26-0900-Sn has PDFs, False if the API returns 404."""
+    """Return True if {base_file}-Sn has PDFs, False if the API returns 404."""
     cf = f"{base_file}-S{n}"
     url = f"{SCRAPE_API}/council-files/{cf}/pdf-links"
     async with httpx.AsyncClient(timeout=15) as client:
@@ -34,7 +35,8 @@ async def probe_branch_exists(base_file: str, n: int) -> bool:
 async def discover_last_branch(base_file: str, known_min: int, job_status: dict | None = None) -> int:
     """
     Find the highest Sx that has PDFs, starting from known_min (confirmed to exist).
-    Probes known_min+1, known_min+2, ... until a 404 is hit.
+    Uses exponential doubling to bracket the upper bound, then binary search.
+    Much faster than linear scan for files with many branches (e.g. 183 → ~15 probes).
     Returns the last valid branch number.
     """
     def _set(msg: str):
@@ -42,19 +44,28 @@ async def discover_last_branch(base_file: str, known_min: int, job_status: dict 
             job_status["message"] = msg
         print(f"[downloader] {msg}")
 
-    _set(f"Finding all branches of {base_file} (checking beyond S{known_min})...")
-    last = known_min
-    n = known_min + 1
-    while True:
-        exists = await probe_branch_exists(base_file, n)
-        if not exists:
-            break
-        _set(f"Found {base_file}-S{n}, checking further...")
-        last = n
-        n += 1
+    _set(f"Finding last branch of {base_file} (starting from S{known_min})...")
 
-    _set(f"Last branch of {base_file} is S{last} ({last} branches total)")
-    return last
+    # Phase 1: exponential doubling to bracket the upper bound
+    lo = known_min   # confirmed to exist
+    step = 1
+    while await probe_branch_exists(base_file, lo + step):
+        lo += step
+        step *= 2
+    hi = lo + step   # first confirmed non-existent
+
+    _set(f"Narrowing down: between S{lo} and S{hi}...")
+
+    # Phase 2: binary search within [lo, hi)
+    while lo + 1 < hi:
+        mid = (lo + hi) // 2
+        if await probe_branch_exists(base_file, mid):
+            lo = mid
+        else:
+            hi = mid
+
+    _set(f"Last branch of {base_file} is S{lo} ({lo} branches total)")
+    return lo
 
 
 async def _extract_zip_to(zip_bytes: bytes, dest_folder: Path) -> int:
@@ -125,38 +136,56 @@ async def download_all_branches(
     last_branch: int,
     docs_path: Path,
     job_status: dict | None = None,
+    concurrency: int = 8,
 ) -> tuple[Path, int]:
     """
-    Download S1 through S{last_branch} for base_file.
+    Download S1 through S{last_branch} for base_file concurrently.
     Each branch is extracted into docs_path / base_file / {base_file}-Sx /
     so ingest_legislation() can read them all with proper subfolder citations.
+    Branches already on disk (non-empty folder) are skipped.
 
     Returns (base_folder, total_pdf_count).
     """
     base_folder = docs_path / base_file
     base_folder.mkdir(parents=True, exist_ok=True)
+
+    completed = 0
     total_pdfs = 0
+    sem = asyncio.Semaphore(concurrency)
 
     def _set(msg: str):
         if job_status:
             job_status["message"] = msg
         print(f"[downloader] {msg}")
 
-    for n in range(1, last_branch + 1):
+    async def download_one(n: int):
+        nonlocal completed, total_pdfs
         branch = f"{base_file}-S{n}"
         dest = base_folder / branch
-        _set(f"Downloading {branch} ({n}/{last_branch})...")
-        try:
-            _, count = await download_and_extract(
-                council_file=branch,
-                docs_path=docs_path,          # not used (override provided)
-                dest_folder_override=dest,
-                job_status=None,              # suppress per-branch messages
-            )
-            total_pdfs += count
-            print(f"[downloader] {branch}: {count} PDFs")
-        except Exception as e:
-            print(f"[downloader] WARNING: {branch} failed — {e}")
 
+        # Skip branches already downloaded
+        existing = list(dest.rglob("*.pdf")) if dest.exists() else []
+        if existing:
+            total_pdfs += len(existing)
+            completed += 1
+            _set(f"Downloading branches… {completed}/{last_branch} (S{n} cached)")
+            return
+
+        async with sem:
+            try:
+                _, count = await download_and_extract(
+                    council_file=branch,
+                    docs_path=docs_path,
+                    dest_folder_override=dest,
+                    job_status=None,   # suppress per-branch messages
+                )
+                total_pdfs += count
+                print(f"[downloader] {branch}: {count} PDFs")
+            except Exception as e:
+                print(f"[downloader] WARNING: {branch} failed — {e}")
+            completed += 1
+            _set(f"Downloading branches… {completed}/{last_branch}")
+
+    await asyncio.gather(*[download_one(n) for n in range(1, last_branch + 1)])
     _set(f"Downloaded all {last_branch} branches of {base_file} ({total_pdfs} PDFs total)")
     return base_folder, total_pdfs
