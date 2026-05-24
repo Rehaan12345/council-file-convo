@@ -37,8 +37,8 @@ export default function App() {
   const [addLoading, setAddLoading] = useState(false);
   const [ingestJob, setIngestJob] = useState<IngestJob | null>(null);
 
-  // Branch confirm prompt: shown when user submits a -Sx file
-  const [branchConfirm, setBranchConfirm] = useState<{ cf: string; baseFile: string; branchNum: number } | null>(null);
+  // Branch confirm prompt: shown when branches are detected for a submitted council file
+  const [branchConfirm, setBranchConfirm] = useState<{ cf: string; baseFile: string } | null>(null);
 
   // Delete confirm: which legislation tab is pending deletion
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
@@ -189,11 +189,23 @@ export default function App() {
     if (err) { setAddError(err); return; }
     setAddError("");
 
-    // If it's a -Sx file, show branch confirm prompt instead of immediately ingesting
-    const branchMatch = cf.match(/^(.+)-S(\d+)$/);
-    if (branchMatch) {
-      setBranchConfirm({ cf, baseFile: branchMatch[1], branchNum: parseInt(branchMatch[2], 10) });
-      return;
+    // Strip any -Sx suffix to get the base file for branch checking
+    const baseFile = cf.replace(/-S\d+$/, "");
+
+    // Always probe for branches before ingesting
+    setAddLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/api/check-branches/${encodeURIComponent(baseFile)}`);
+      const { has_branches } = await res.json();
+      if (has_branches) {
+        // Let user choose: just this file, or all branches
+        setAddLoading(false);
+        setBranchConfirm({ cf, baseFile });
+        return;
+      }
+    } catch {
+      // If the probe fails, fall through and attempt a normal ingest
+      setAddLoading(false);
     }
 
     await startIngest(cf, false);
@@ -490,15 +502,14 @@ export default function App() {
         {branchConfirm && !addLoading && (
           <div className="branch-confirm">
             <span className="branch-confirm-text">
-              <strong>{branchConfirm.cf}</strong> is branch S{branchConfirm.branchNum} of{" "}
-              <strong>{branchConfirm.baseFile}</strong>. Load how much?
+              <strong>{branchConfirm.baseFile}</strong> has multiple sub-files (branches). Load how much?
             </span>
             <div className="branch-confirm-btns">
               <button
                 className="branch-btn branch-btn--single"
                 onClick={() => startIngest(branchConfirm.cf, false)}
               >
-                S{branchConfirm.branchNum} only
+                Just {branchConfirm.cf}
               </button>
               <button
                 className="branch-btn branch-btn--all"

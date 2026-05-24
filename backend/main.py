@@ -115,9 +115,14 @@ async def _run_ingest(job_id: str, council_file: str, load_all_branches: bool = 
 
         # ── Branched flow: download S1..SN for the base file ──────────────────
         branch_match = re.search(r"^(.+)-S(\d+)$", council_file)
-        if load_all_branches and branch_match:
-            base_file = branch_match.group(1)
-            known_min = int(branch_match.group(2))
+        if load_all_branches:
+            # Works whether the user entered "14-1174" or "14-1174-S4"
+            if branch_match:
+                base_file = branch_match.group(1)
+                known_min = int(branch_match.group(2))
+            else:
+                base_file = council_file
+                known_min = 1  # check-branches already confirmed S1 exists
 
             # Step 1: discover last branch
             job["status"] = "downloading"
@@ -248,6 +253,18 @@ def ingest_status(job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
     return IngestStatus(**job)
+
+
+@app.get("/api/check-branches/{council_file}")
+async def check_branches(council_file: str):
+    """
+    Probe the scrape-cf API to see if S1 exists for this base council file.
+    Strips any -Sx suffix so callers can pass either "14-1174" or "14-1174-S4".
+    Returns {"has_branches": bool, "base_file": str}.
+    """
+    base_file = re.sub(r"-S\d+$", "", council_file.strip())
+    has_branches = await downloader.probe_branch_exists(base_file, 1)
+    return {"has_branches": has_branches, "base_file": base_file}
 
 
 @app.get("/api/legislations/{council_file}/branches")
