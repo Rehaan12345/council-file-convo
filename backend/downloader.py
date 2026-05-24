@@ -26,7 +26,7 @@ async def probe_branch_exists(base_file: str, n: int) -> bool:
             if resp.status_code == 404:
                 return False
             data = resp.json()
-            return data.get("unique_pdfs", 0) > 0
+            return data.get("unique_pdf_count", 0) > 0
         except Exception:
             return False
 
