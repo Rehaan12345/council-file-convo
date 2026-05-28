@@ -40,8 +40,9 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID());
 
-  // Sidebar session history
+  // Sidebar
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Add council file form
   const [addInput, setAddInput] = useState("");
@@ -219,6 +220,7 @@ export default function App() {
 
   async function handleSelectSession(session: Session) {
     if (loading) return;
+    setSidebarOpen(false);
     try {
       const res = await fetch(`${API_URL}/api/sessions/${session.session_id}/messages`);
       if (!res.ok) return;
@@ -469,6 +471,8 @@ export default function App() {
         sessions={sessions}
         activeSessionId={sessionId}
         loading={loading}
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
         onNewChat={handleNewChat}
         onSelectSession={handleSelectSession}
         onDeleteSession={handleDeleteSession}
@@ -478,6 +482,13 @@ export default function App() {
         <div className="header-inner">
           {/* ── Top row: title + add form ── */}
           <div className="header-top">
+            <button
+              className="sidebar-toggle-btn"
+              onClick={() => setSidebarOpen((o) => !o)}
+              aria-label="Toggle history"
+            >
+              ☰
+            </button>
             <div className="header-text">
               <h1 className="header-title">{meta.title}</h1>
               <p className="header-subtitle">{meta.subtitle}</p>

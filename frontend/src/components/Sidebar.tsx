@@ -11,6 +11,8 @@ interface SidebarProps {
   sessions: Session[];
   activeSessionId: string;
   loading?: boolean;
+  isOpen?: boolean;
+  onClose?: () => void;
   onNewChat: () => void;
   onSelectSession: (session: Session) => void;
   onDeleteSession: (sessionId: string) => void;
@@ -43,6 +45,8 @@ export default function Sidebar({
   sessions,
   activeSessionId,
   loading = false,
+  isOpen = false,
+  onClose,
   onNewChat,
   onSelectSession,
   onDeleteSession,
@@ -50,46 +54,58 @@ export default function Sidebar({
   const groups = groupSessions(sessions);
 
   return (
-    <aside className="sidebar">
-      <div className="sidebar-header">
-        <span className="sidebar-brand">council-file-convo</span>
-        <button className="sidebar-new-btn" onClick={onNewChat} title="New chat" disabled={loading}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-        </button>
-      </div>
+    <>
+      {/* Backdrop — mobile only, closes sidebar on tap */}
+      {isOpen && (
+        <div className="sidebar-backdrop" onClick={onClose} aria-hidden="true" />
+      )}
 
-      <div className="sidebar-sessions">
-        {groups.length === 0 && (
-          <p className="sidebar-empty">No conversations yet.<br />Ask a question to get started.</p>
-        )}
-        {groups.map(group => (
-          <div key={group.label} className="sidebar-group">
-            <p className="sidebar-group-label">{group.label}</p>
-            {group.sessions.map(s => (
-              <div
-                key={s.session_id}
-                className={`sidebar-item${s.session_id === activeSessionId ? " sidebar-item--active" : ""}${loading ? " sidebar-item--disabled" : ""}`}
-                onClick={() => !loading && onSelectSession(s)}
-              >
-                <span className="sidebar-item-title">{s.title}</span>
-                {s.legislation_ids.length > 0 && (
-                  <span className="sidebar-item-legs">{s.legislation_ids.join(" · ")}</span>
-                )}
-                <button
-                  className="sidebar-item-delete"
-                  onClick={e => { e.stopPropagation(); onDeleteSession(s.session_id); }}
-                  title="Delete"
-                  aria-label="Delete conversation"
-                >
-                  ×
-                </button>
-              </div>
-            ))}
+      <aside className={`sidebar${isOpen ? " sidebar--open" : ""}`}>
+        <div className="sidebar-header">
+          <span className="sidebar-brand">council-file-convo</span>
+          <div className="sidebar-header-actions">
+            <button className="sidebar-new-btn" onClick={onNewChat} title="New chat" disabled={loading}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+            </button>
+            <button className="sidebar-close-btn" onClick={onClose} title="Close" aria-label="Close history">
+              ✕
+            </button>
           </div>
-        ))}
-      </div>
-    </aside>
+        </div>
+
+        <div className="sidebar-sessions">
+          {groups.length === 0 && (
+            <p className="sidebar-empty">No conversations yet.<br />Ask a question to get started.</p>
+          )}
+          {groups.map(group => (
+            <div key={group.label} className="sidebar-group">
+              <p className="sidebar-group-label">{group.label}</p>
+              {group.sessions.map(s => (
+                <div
+                  key={s.session_id}
+                  className={`sidebar-item${s.session_id === activeSessionId ? " sidebar-item--active" : ""}${loading ? " sidebar-item--disabled" : ""}`}
+                  onClick={() => !loading && onSelectSession(s)}
+                >
+                  <span className="sidebar-item-title">{s.title}</span>
+                  {s.legislation_ids.length > 0 && (
+                    <span className="sidebar-item-legs">{s.legislation_ids.join(" · ")}</span>
+                  )}
+                  <button
+                    className="sidebar-item-delete"
+                    onClick={e => { e.stopPropagation(); onDeleteSession(s.session_id); }}
+                    title="Delete"
+                    aria-label="Delete conversation"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      </aside>
+    </>
   );
 }

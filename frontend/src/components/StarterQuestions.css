@@ -24,6 +24,8 @@
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s;
   text-align: left;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 .starter-chip:hover {
