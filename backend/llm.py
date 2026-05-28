@@ -6,6 +6,26 @@ from langchain_core.messages import HumanMessage, AIMessage
 
 load_dotenv()
 
+_anthropic_client = None
+_openai_client = None
+
+
+def _get_anthropic_client():
+    global _anthropic_client
+    if _anthropic_client is None:
+        import anthropic
+        _anthropic_client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+    return _anthropic_client
+
+
+def _get_openai_client():
+    global _openai_client
+    if _openai_client is None:
+        from openai import OpenAI
+        _openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    return _openai_client
+
+
 def _get_context(legislation_id: str) -> str:
     """Return the stored context blurb for a legislation, falling back to a generic one."""
     from legislation_meta import get_meta
@@ -109,7 +129,7 @@ def _call_claude(
         ],
     })
 
-    client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+    client = _get_anthropic_client()
     response = client.messages.create(
         model="claude-haiku-4-5",
         max_tokens=1024,
@@ -141,7 +161,6 @@ def _call_openai(
     legislations: list[str],
     prior_messages: list | None = None,
 ) -> dict:
-    from openai import OpenAI
     prior_messages = prior_messages or []
     print(f"[llm] Calling OpenAI (gpt-4o-mini) for legislations {legislations}...")
     context = _build_context(chunks)
@@ -149,7 +168,7 @@ def _call_openai(
     user_message = f"{history_preamble}Document excerpts:\n\n{context}\n\nQuestion: {question}"
     print(f"[llm] Prompt size: ~{len(user_message.split())} words")
 
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    client = _get_openai_client()
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[

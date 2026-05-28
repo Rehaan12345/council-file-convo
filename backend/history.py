@@ -1,33 +1,45 @@
 import json
 import os
-import sqlite3
 import time
 from pathlib import Path
 
+from sqlalchemy import create_engine, event, text
 from langchain_community.chat_message_histories import SQLChatMessageHistory
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 
 _DB_PATH = Path(os.getenv("HISTORY_DB_PATH", str(Path(__file__).parent / "chat_history.db")))
-_CONN = f"sqlite:///{_DB_PATH}"
 HISTORY_WINDOW = 5
 
+_engine = create_engine(
+    f"sqlite:///{_DB_PATH}",
+    connect_args={"check_same_thread": False, "timeout": 30},
+)
 
-def _db() -> sqlite3.Connection:
-    conn = sqlite3.connect(str(_DB_PATH))
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS sessions (
-            session_id      TEXT PRIMARY KEY,
-            title           TEXT,
-            legislation_ids TEXT NOT NULL DEFAULT '[]',
-            created_at      REAL NOT NULL
-        )
-    """)
-    conn.commit()
-    return conn
+
+@event.listens_for(_engine, "connect")
+def _set_wal(dbapi_conn, _):
+    dbapi_conn.execute("PRAGMA journal_mode=WAL")
+    dbapi_conn.execute("PRAGMA busy_timeout=30000")
+
+
+def _ensure_sessions_table():
+    with _engine.connect() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                session_id      TEXT PRIMARY KEY,
+                title           TEXT,
+                legislation_ids TEXT NOT NULL DEFAULT '[]',
+                created_at      REAL NOT NULL
+            )
+        """))
+        conn.commit()
+
+
+_ensure_sessions_table()
 
 
 def get_history(session_id: str) -> SQLChatMessageHistory:
-    return SQLChatMessageHistory(session_id=session_id, connection=_CONN)
+    return SQLChatMessageHistory(session_id=session_id, connection=_engine)
 
 
 def load_recent(session_id: str) -> list[BaseMessage]:
@@ -45,24 +57,27 @@ def save_exchange(
     h.add_user_message(question)
     h.add_ai_message(answer)
     # INSERT OR IGNORE so only the first exchange sets the title / created_at
-    conn = _db()
-    conn.execute(
-        "INSERT OR IGNORE INTO sessions (session_id, title, legislation_ids, created_at) "
-        "VALUES (?, ?, ?, ?)",
-        (session_id, question[:120], json.dumps(legislation_ids or []), time.time()),
-    )
-    conn.commit()
-    conn.close()
+    with _engine.connect() as conn:
+        conn.execute(
+            text(
+                "INSERT OR IGNORE INTO sessions (session_id, title, legislation_ids, created_at) "
+                "VALUES (:sid, :title, :legs, :ts)"
+            ),
+            {"sid": session_id, "title": question[:120],
+             "legs": json.dumps(legislation_ids or []), "ts": time.time()},
+        )
+        conn.commit()
 
 
 def list_sessions() -> list[dict]:
     """Return all sessions ordered newest-first."""
-    conn = _db()
-    rows = conn.execute(
-        "SELECT session_id, title, legislation_ids, created_at "
-        "FROM sessions ORDER BY created_at DESC"
-    ).fetchall()
-    conn.close()
+    with _engine.connect() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT session_id, title, legislation_ids, created_at "
+                "FROM sessions ORDER BY created_at DESC"
+            )
+        ).fetchall()
     return [
         {
             "session_id": r[0],
@@ -86,7 +101,6 @@ def get_session_messages(session_id: str) -> list[dict]:
 
 def delete_session(session_id: str) -> None:
     get_history(session_id).clear()
-    conn = _db()
-    conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
-    conn.commit()
-    conn.close()
+    with _engine.connect() as conn:
+        conn.execute(text("DELETE FROM sessions WHERE session_id = :sid"), {"sid": session_id})
+        conn.commit()

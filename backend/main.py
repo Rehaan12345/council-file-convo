@@ -17,7 +17,6 @@ import legislation_meta as leg_meta
 from ingest import ingest_legislation, collection_name
 from hot_sheet import date_to_hs_id
 from chromadb.utils import embedding_functions
-import chromadb
 
 load_dotenv()
 
@@ -41,7 +40,7 @@ async def _auto_ingest_missing():
             return
         print(f"[startup] Found {len(missing)} unindexed folder(s): {[f.name for f in missing]}")
         ef = embedding_functions.SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
-        client = chromadb.PersistentClient(path=str(DB_PATH))
+        client = rag.get_chroma_client()
         for folder in sorted(missing):
             print(f"[startup] Auto-ingesting {folder.name}...")
             count = ingest_legislation(folder, client, ef)
@@ -128,7 +127,7 @@ async def _run_ingest(job_id: str, council_file: str, load_all_branches: bool = 
         ef = embedding_functions.SentenceTransformerEmbeddingFunction(
             model_name="all-MiniLM-L6-v2"
         )
-        client = chromadb.PersistentClient(path=str(DB_PATH))
+        client = rag.get_chroma_client()
 
         # ── Branched flow: download S1..SN for the base file ──────────────────
         branch_match = re.search(r"^(.+)-S(\d+)$", council_file)
@@ -261,7 +260,7 @@ async def _run_hot_sheet_load(job_id: str, hs_id: str, date: str, entries: list[
         ef = embedding_functions.SentenceTransformerEmbeddingFunction(
             model_name="all-MiniLM-L6-v2"
         )
-        client = chromadb.PersistentClient(path=str(DB_PATH))
+        client = rag.get_chroma_client()
         chunks_indexed = ingest_legislation(hs_folder, client, ef)
 
         # Metadata is deterministic — no Claude call needed

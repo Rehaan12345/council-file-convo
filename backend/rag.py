@@ -1,5 +1,6 @@
 import hashlib
 import os
+import threading
 from pathlib import Path
 
 import chromadb
@@ -15,23 +16,39 @@ _collections: dict = {}
 _answer_cache: dict[str, dict] = {}
 _answer_cache_legs: dict[str, set] = {}   # legislation → set of cache keys
 
+_chroma_client: chromadb.PersistentClient | None = None
+_chroma_lock = threading.Lock()
+_collections_lock = threading.Lock()
+
 
 def _cache_key(question: str, legislation: str) -> str:
     normalized = question.lower().strip()
     return hashlib.sha256(f"{legislation}:{normalized}".encode()).hexdigest()
 
 
+def get_chroma_client() -> chromadb.PersistentClient:
+    global _chroma_client
+    if _chroma_client is None:
+        with _chroma_lock:
+            if _chroma_client is None:
+                _chroma_client = chromadb.PersistentClient(path=str(DB_PATH))
+    return _chroma_client
+
+
 def _get_collection(legislation: str):
-    global _collections
-    if legislation not in _collections:
-        coll_name = collection_name(legislation)
-        print(f"[rag] Loading ChromaDB collection '{coll_name}' from {DB_PATH}...")
-        ef = embedding_functions.SentenceTransformerEmbeddingFunction(
-            model_name="all-MiniLM-L6-v2"
-        )
-        client = chromadb.PersistentClient(path=str(DB_PATH))
-        _collections[legislation] = client.get_collection(coll_name, embedding_function=ef)
-        print(f"[rag] Loaded '{coll_name}' ({_collections[legislation].count()} chunks)")
+    if legislation in _collections:
+        return _collections[legislation]
+    with _collections_lock:
+        if legislation not in _collections:
+            coll_name = collection_name(legislation)
+            print(f"[rag] Loading ChromaDB collection '{coll_name}' from {DB_PATH}...")
+            ef = embedding_functions.SentenceTransformerEmbeddingFunction(
+                model_name="all-MiniLM-L6-v2"
+            )
+            _collections[legislation] = get_chroma_client().get_collection(
+                coll_name, embedding_function=ef
+            )
+            print(f"[rag] Loaded '{coll_name}' ({_collections[legislation].count()} chunks)")
     return _collections[legislation]
 
 
@@ -46,7 +63,7 @@ def get_chunk_count(legislation: str) -> int:
 def get_available_legislations() -> list[dict]:
     """Return [{id, chunks}] for every indexed legislation, sorted by id."""
     try:
-        client = chromadb.PersistentClient(path=str(DB_PATH))
+        client = get_chroma_client()
         result = []
         for col in client.list_collections():
             if col.name.startswith("leg_"):
@@ -61,7 +78,8 @@ def get_available_legislations() -> list[dict]:
 
 def invalidate_collection_cache(legislation: str):
     """Drop a cached collection handle so it gets reloaded after re-ingestion."""
-    _collections.pop(legislation, None)
+    with _collections_lock:
+        _collections.pop(legislation, None)
     # Clear answer cache entries for this legislation
     for key in _answer_cache_legs.pop(legislation, set()):
         _answer_cache.pop(key, None)
@@ -76,7 +94,7 @@ def delete_legislation(legislation: str, docs_path: Path) -> int:
     from ingest import collection_name as _col_name
 
     coll_name = _col_name(legislation)
-    client = chromadb.PersistentClient(path=str(DB_PATH))
+    client = get_chroma_client()
 
     # Count before deleting so we can report it
     try:

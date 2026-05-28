@@ -12,12 +12,15 @@ called automatically to produce:
 import json
 import os
 import re
+import threading
 import time
 from pathlib import Path
 
 import anthropic
 import chromadb
 from chromadb.utils import embedding_functions
+
+_meta_lock = threading.Lock()
 
 META_PATH = Path(os.getenv("META_PATH", str(Path(__file__).parent / "legislation_meta.json")))
 DB_PATH   = Path(os.getenv("DB_PATH",   str(Path(__file__).parent / "chroma_db")))
@@ -112,7 +115,8 @@ def generate_and_save_meta(legislation_id: str) -> dict:
     ef = embedding_functions.SentenceTransformerEmbeddingFunction(
         model_name="all-MiniLM-L6-v2"
     )
-    client = chromadb.PersistentClient(path=str(DB_PATH))
+    from rag import get_chroma_client
+    client = get_chroma_client()
     try:
         collection = client.get_collection(collection_name(legislation_id), embedding_function=ef)
     except Exception as e:
@@ -149,7 +153,8 @@ Below are document excerpts from Council File {legislation_id}. Based only on th
 Document excerpts:
 {context_text}"""
 
-    anthropic_client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+    from llm import _get_anthropic_client
+    anthropic_client = _get_anthropic_client()
 
     # Retry with exponential backoff on rate limit errors (10k tokens/min limit).
     # Multiple simultaneous ingests from a hot sheet load can trigger 429s.
@@ -199,9 +204,10 @@ Document excerpts:
     ]
     generated["starters"] = starters[:4]
 
-    meta = load_meta()
-    meta[legislation_id] = generated
-    save_meta(meta)
+    with _meta_lock:
+        meta = load_meta()
+        meta[legislation_id] = generated
+        save_meta(meta)
 
     print(f"[meta] '{legislation_id}' → {generated['subtitle']}")
     return generated
@@ -240,8 +246,9 @@ def save_hot_sheet_meta(hs_id: str, date: str, entries: list[dict]) -> dict:
         ],
     }
 
-    meta = load_meta()
-    meta[hs_id] = generated
-    save_meta(meta)
+    with _meta_lock:
+        meta = load_meta()
+        meta[hs_id] = generated
+        save_meta(meta)
     print(f"[meta] '{hs_id}' → {generated['subtitle']}")
     return generated
