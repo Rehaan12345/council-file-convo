@@ -1059,6 +1059,11 @@ button, input, textarea, label {
     border-radius: 10px;
   }
 
+  /* Shrink placeholder so the full hint fits on one line */
+  .chat-input::placeholder {
+    font-size: 12px;
+  }
+
   .send-btn {
     width: 42px;
     height: 42px;
