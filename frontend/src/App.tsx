@@ -138,6 +138,7 @@ export default function App() {
   // ── Legislation selection ──────────────────────────────────────────────────
   // Clicking a tab body: switch primary, reset context to just that tab, clear chat + session
   function clickTab(leg: string) {
+    if (loading) return;
     if (leg === primaryLeg && contextLegs.length === 1) return;
     setPrimaryLeg(leg);
     setContextLegs([leg]);
@@ -210,12 +211,14 @@ export default function App() {
   // ── Sidebar session management ─────────────────────────────────────────────
 
   function handleNewChat() {
+    if (loading) return;
     setMessages([]);
     setInput("");
     setSessionId(crypto.randomUUID());
   }
 
   async function handleSelectSession(session: Session) {
+    if (loading) return;
     try {
       const res = await fetch(`${API_URL}/api/sessions/${session.session_id}/messages`);
       if (!res.ok) return;
@@ -452,7 +455,8 @@ export default function App() {
       ? contextLegs.join(" · ")
       : (primaryLegData?.subtitle || "LA City Council legislation"),
   };
-  const showStarters = messages.length === 0 && !loading;
+  const showWelcome = messages.length === 0 && !loading;
+  const showStarters = !loading && !!primaryLeg && !!primaryLegData?.starters;
 
   const statusEmoji =
     ingestJob?.status === "downloading" ? "⏳" :
@@ -464,6 +468,7 @@ export default function App() {
       <Sidebar
         sessions={sessions}
         activeSessionId={sessionId}
+        loading={loading}
         onNewChat={handleNewChat}
         onSelectSession={handleSelectSession}
         onDeleteSession={handleDeleteSession}
@@ -553,12 +558,14 @@ export default function App() {
                         checked={inContext}
                         title={inContext ? "Remove from context" : "Add to context"}
                         onChange={() => toggleContextLeg(leg.id)}
+                        disabled={loading}
                       />
 
                       <button
                         className={`leg-tab${isPrimary ? " leg-tab--active" : ""}`}
                         onClick={() => clickTab(leg.id)}
                         title={`${leg.chunks.toLocaleString()} chunks indexed`}
+                        disabled={loading}
                       >
                         <span className="leg-tab-id">{leg.id}</span>
                         {leg.subtitle && (
@@ -755,7 +762,7 @@ export default function App() {
 
       <main className="chat-area">
         <div className="chat-inner">
-          {showStarters && primaryLeg && (
+          {showWelcome && primaryLeg && (
             <div className="welcome">
               <p className="welcome-text">
                 {contextLegs.length > 1
@@ -763,7 +770,6 @@ export default function App() {
                   : "Ask me anything about this legislation. I'll answer in plain language and tell you exactly which document my answer comes from."
                 }
               </p>
-              <StarterQuestions starters={primaryLegData?.starters} onSelect={sendQuestion} />
             </div>
           )}
 
@@ -777,6 +783,10 @@ export default function App() {
                 <span className="dot" /><span className="dot" /><span className="dot" />
               </div>
             </div>
+          )}
+
+          {showStarters && (
+            <StarterQuestions starters={primaryLegData?.starters} onSelect={sendQuestion} />
           )}
           <div ref={bottomRef} />
         </div>
