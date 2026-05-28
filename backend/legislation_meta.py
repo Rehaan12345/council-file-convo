@@ -12,6 +12,7 @@ called automatically to produce:
 import json
 import os
 import re
+import time
 from pathlib import Path
 
 import anthropic
@@ -149,13 +150,30 @@ Document excerpts:
 {context_text}"""
 
     anthropic_client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-    response = anthropic_client.messages.create(
-        model="claude-haiku-4-5",
-        max_tokens=600,
-        messages=[{"role": "user", "content": prompt}],
-    )
 
-    raw = response.content[0].text.strip()
+    # Retry with exponential backoff on rate limit errors (10k tokens/min limit).
+    # Multiple simultaneous ingests from a hot sheet load can trigger 429s.
+    raw = None
+    for attempt in range(4):
+        try:
+            response = anthropic_client.messages.create(
+                model="claude-haiku-4-5",
+                max_tokens=600,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            raw = response.content[0].text.strip()
+            break
+        except anthropic.RateLimitError as e:
+            wait = 60 * (attempt + 1)   # 60s, 120s, 180s
+            print(f"[meta] Rate limit hit for '{legislation_id}' — waiting {wait}s (attempt {attempt + 1}/4)")
+            time.sleep(wait)
+        except Exception as e:
+            print(f"[meta] API error for '{legislation_id}': {e}")
+            break
+
+    if raw is None:
+        print(f"[meta] All retries exhausted for '{legislation_id}' — using fallback")
+        raw = ""
     raw = re.sub(r"^```(?:json)?\s*", "", raw)
     raw = re.sub(r"\s*```$", "", raw)
 
@@ -195,3 +213,35 @@ def ensure_meta(legislation_id: str) -> dict:
     if existing:
         return existing
     return generate_and_save_meta(legislation_id)
+
+
+def save_hot_sheet_meta(hs_id: str, date: str, entries: list[dict]) -> dict:
+    """
+    Build and persist metadata for a hot sheet collection — no Claude call needed
+    because the subtitle and context are deterministic from the date + entry list.
+    """
+    n = len(entries)
+    preview = ", ".join(e["full_id"] for e in entries[:6])
+    if n > 6:
+        preview += f", and {n - 6} more"
+
+    generated = {
+        "subtitle": f"Hot Sheet — {date}",
+        "context": (
+            f"LA City Council referral hot sheet for {date}, containing {n} council files: "
+            f"{preview}. "
+            f"Each council file is accessible as a branch in the branch filter."
+        ),
+        "starters": [
+            "What council files were referred on this hot sheet?",
+            "Give me a summary of the most significant items on this hot sheet.",
+            "Which of these files relate to housing or community development?",
+            "Are there any budget or funding items in today's referrals?",
+        ],
+    }
+
+    meta = load_meta()
+    meta[hs_id] = generated
+    save_meta(meta)
+    print(f"[meta] '{hs_id}' → {generated['subtitle']}")
+    return generated

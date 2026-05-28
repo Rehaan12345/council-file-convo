@@ -15,12 +15,13 @@ import downloader
 import hot_sheet as hs
 import legislation_meta as leg_meta
 from ingest import ingest_legislation, collection_name
+from hot_sheet import date_to_hs_id
 from chromadb.utils import embedding_functions
 import chromadb
 
 load_dotenv()
 
-DOCS_PATH = Path(os.getenv("DOCS_PATH", "/Users/rehaananjaria/Visic/CouncilFiles"))
+DOCS_PATH = Path(os.getenv("DOCS_PATH", "/data/council-files"))
 DB_PATH = Path(os.getenv("DB_PATH", str(Path(__file__).parent / "chroma_db")))
 
 # Valid council file format: "17-0090" or "17-0090-S4"
@@ -79,6 +80,7 @@ class ChatRequest(BaseModel):
     question: str
     legislations: list[str]               # one or more legislation IDs
     branches: dict[str, list[str]] = {}   # legislation_id → selected branches (empty = all)
+    session_id: str | None = None         # opaque UUID from the frontend; enables memory
 
 
 class ChatResponse(BaseModel):
@@ -106,6 +108,16 @@ class IngestStatus(BaseModel):
     council_file: str
     status: str   # "downloading" | "indexing" | "done" | "error"
     message: str
+
+
+class HotSheetLoadRequest(BaseModel):
+    date: str
+    entries: list[dict]   # [{full_id, base_file, branch, title}, ...]
+
+
+class HotSheetLoadStarted(BaseModel):
+    job_id: str
+    hs_id: str
 
 
 # ─── Background task ───────────────────────────────────────────────────────────
@@ -193,6 +205,83 @@ async def _run_ingest(job_id: str, council_file: str, load_all_branches: bool = 
         print(f"[ingest-job:{job_id}] ERROR: {e}")
 
 
+async def _run_hot_sheet_load(job_id: str, hs_id: str, date: str, entries: list[dict]):
+    """
+    Background task: download every council file in a hot sheet into
+    DOCS_PATH/{hs_id}/{full_id}/, then index the whole folder as one collection.
+    """
+    job = ingest_jobs[job_id]
+    try:
+        hs_folder = DOCS_PATH / hs_id
+        hs_folder.mkdir(parents=True, exist_ok=True)
+
+        # ── Concurrent downloads (up to 6 at a time) ──────────────────────────
+        total = len(entries)
+        completed = 0
+        total_pdfs = 0
+        sem = asyncio.Semaphore(6)
+
+        async def download_one(entry: dict):
+            nonlocal completed, total_pdfs
+            full_id = entry["full_id"]
+            dest = hs_folder / full_id
+
+            # Skip already-downloaded folders
+            existing = list(dest.rglob("*.pdf")) if dest.exists() else []
+            if existing:
+                total_pdfs += len(existing)
+                completed += 1
+                job["message"] = f"Downloading… {completed}/{total} ({full_id} cached)"
+                return
+
+            async with sem:
+                try:
+                    _, count = await downloader.download_and_extract(
+                        council_file=full_id,
+                        docs_path=hs_folder,
+                        job_status=None,
+                    )
+                    total_pdfs += count
+                    print(f"[hot-sheet-load:{job_id}] {full_id}: {count} PDFs")
+                except Exception as e:
+                    print(f"[hot-sheet-load:{job_id}] WARNING: {full_id} failed — {e}")
+                completed += 1
+                job["message"] = f"Downloading… {completed}/{total}"
+
+        job["status"] = "downloading"
+        job["message"] = f"Downloading {total} council files for {hs_id}…"
+        print(f"[hot-sheet-load:{job_id}] Downloading {total} entries into {hs_folder}")
+        await asyncio.gather(*[download_one(e) for e in entries])
+
+        # ── Index the whole hs_folder as one collection ────────────────────────
+        job["status"] = "indexing"
+        job["message"] = f"Indexing {total_pdfs} PDFs from {total} council files…"
+        print(f"[hot-sheet-load:{job_id}] Indexing {total_pdfs} PDFs from {hs_folder}")
+
+        ef = embedding_functions.SentenceTransformerEmbeddingFunction(
+            model_name="all-MiniLM-L6-v2"
+        )
+        client = chromadb.PersistentClient(path=str(DB_PATH))
+        chunks_indexed = ingest_legislation(hs_folder, client, ef)
+
+        # Metadata is deterministic — no Claude call needed
+        leg_meta.save_hot_sheet_meta(hs_id, date, entries)
+
+        rag.invalidate_collection_cache(hs_id)
+        job["council_file"] = hs_id
+        job["status"] = "done"
+        job["message"] = (
+            f"Ready — {chunks_indexed} chunks indexed from {total} council files "
+            f"({total_pdfs} PDFs)"
+        )
+        print(f"[hot-sheet-load:{job_id}] Done. {chunks_indexed} chunks, {total} entries.")
+
+    except Exception as e:
+        job["status"] = "error"
+        job["message"] = f"Error: {str(e)}"
+        print(f"[hot-sheet-load:{job_id}] ERROR: {e}")
+
+
 # ─── Endpoints ─────────────────────────────────────────────────────────────────
 
 @app.get("/api/health")
@@ -275,8 +364,9 @@ async def check_branches(council_file: str):
 @app.get("/api/legislations/{council_file}/branches")
 def list_branches(council_file: str):
     """
-    Return the sorted list of branch sub-folder names for a legislation,
-    e.g. ["26-0900-S1", "26-0900-S2", ...].
+    Return the sorted list of branch sub-folder names for a legislation.
+    For regular council files: ["26-0900-S1", "26-0900-S2", ...]
+    For hot sheet collections (HS-YYYY-MM-DD): all direct subfolders (council file IDs).
     Returns an empty list if the legislation has no branches.
     """
     council_file = council_file.strip()
@@ -284,11 +374,18 @@ def list_branches(council_file: str):
     if not leg_folder.is_dir():
         return {"branches": []}
 
-    branch_pattern = re.compile(rf"^{re.escape(council_file)}-S\d+$")
-    branches = sorted(
-        d.name for d in leg_folder.iterdir()
-        if d.is_dir() and branch_pattern.match(d.name)
-    )
+    if council_file.startswith("HS-"):
+        # Hot sheet: every direct subdirectory is a council file branch
+        branches = sorted(
+            d.name for d in leg_folder.iterdir()
+            if d.is_dir() and not d.name.startswith(".")
+        )
+    else:
+        branch_pattern = re.compile(rf"^{re.escape(council_file)}-S\d+$")
+        branches = sorted(
+            d.name for d in leg_folder.iterdir()
+            if d.is_dir() and branch_pattern.match(d.name)
+        )
     return {"branches": branches}
 
 
@@ -335,7 +432,8 @@ def chat(req: ChatRequest):
     if branches:
         print(f"[chat] Branch filter: {branches}")
 
-    result = rag.answer_question(question, legislations, branches=branches or None)
+    result = rag.answer_question(question, legislations, branches=branches or None,
+                                 session_id=req.session_id or None)
     print(f"[chat] Returning answer ({len(result.get('answer',''))} chars), "
           f"{len(result.get('sources',[]))} sources, "
           f"{len(result.get('followups',[]))} followups")
@@ -344,6 +442,25 @@ def chat(req: ChatRequest):
         sources=result.get("sources", []),
         followups=result.get("followups", []),
     )
+
+
+@app.get("/api/sessions")
+def list_sessions_endpoint():
+    from history import list_sessions
+    return list_sessions()
+
+
+@app.get("/api/sessions/{session_id}/messages")
+def get_session_messages_endpoint(session_id: str):
+    from history import get_session_messages
+    return {"messages": get_session_messages(session_id)}
+
+
+@app.delete("/api/sessions/{session_id}")
+def delete_session_endpoint(session_id: str):
+    from history import delete_session
+    delete_session(session_id)
+    return {"deleted": session_id}
 
 
 @app.post("/api/hot-sheet/parse")
@@ -388,3 +505,39 @@ async def parse_hot_sheet(req: HotSheetRequest):
         "indexed":   indexed,
         "unindexed": unindexed,
     }
+
+
+@app.post("/api/hot-sheet/load", response_model=HotSheetLoadStarted)
+async def load_hot_sheet(req: HotSheetLoadRequest, background_tasks: BackgroundTasks):
+    """
+    Kick off a background job that downloads every council file in a hot sheet
+    into DOCS_PATH/{hs_id}/{full_id}/ and indexes the whole folder as one
+    ChromaDB collection keyed by hs_id (e.g. 'HS-2026-05-19').
+    """
+    if not req.entries:
+        raise HTTPException(status_code=400, detail="No entries provided")
+
+    hs_id = date_to_hs_id(req.date)
+    print(f"\n[hot-sheet/load] Starting load for {hs_id} ({len(req.entries)} entries)")
+
+    # If already indexed, return 409
+    existing = [l["id"] for l in rag.get_available_legislations()]
+    if hs_id in existing:
+        raise HTTPException(
+            status_code=409,
+            detail=f"'{hs_id}' is already indexed.",
+        )
+
+    job_id = str(uuid.uuid4())
+    ingest_jobs[job_id] = {
+        "job_id": job_id,
+        "council_file": hs_id,
+        "status": "downloading",
+        "message": f"Starting download for {hs_id}…",
+    }
+
+    background_tasks.add_task(
+        _run_hot_sheet_load, job_id, hs_id, req.date, req.entries
+    )
+    print(f"[hot-sheet/load] Job {job_id} started for {hs_id}")
+    return HotSheetLoadStarted(job_id=job_id, hs_id=hs_id)

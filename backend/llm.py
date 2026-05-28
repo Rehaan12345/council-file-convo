@@ -2,6 +2,7 @@ import os
 import json
 import re
 from dotenv import load_dotenv
+from langchain_core.messages import HumanMessage, AIMessage
 
 load_dotenv()
 
@@ -61,12 +62,52 @@ def _parse_llm_output(raw: str) -> dict:
         return {"answer": raw, "sources": [], "followups": []}
 
 
-def _call_claude(question: str, chunks: list[dict], legislations: list[str]) -> dict:
+def _format_history_for_openai(prior_messages: list) -> str:
+    """Serialize history as a plain text preamble for OpenAI's single user message."""
+    if not prior_messages:
+        return ""
+    lines = ["Prior conversation:"]
+    for msg in prior_messages:
+        role = "User" if isinstance(msg, HumanMessage) else "Assistant"
+        lines.append(f"{role}: {msg.content}")
+    return "\n".join(lines) + "\n\n"
+
+
+def _call_claude(
+    question: str,
+    chunks: list[dict],
+    legislations: list[str],
+    prior_messages: list | None = None,
+) -> dict:
     import anthropic
-    print(f"[llm] Calling Claude (claude-haiku-4-5) for legislations {legislations}...")
+    prior_messages = prior_messages or []
+    has_history = bool(prior_messages)
+    print(f"[llm] Calling Claude (claude-haiku-4-5) for legislations {legislations}"
+          f"{f' (history: {len(prior_messages)//2} turns)' if has_history else ''}...")
     context = _build_context(chunks)
     approx_words = len(context.split()) + len(question.split())
-    print(f"[llm] Prompt size: ~{approx_words} words (chunks cacheable, question not)")
+    print(f"[llm] Prompt size: ~{approx_words} words"
+          f"{' (doc cache active — first turn only with history)' if has_history else ' (chunks cacheable)'}")
+
+    # Build messages list: prior turns (plain text) + current turn (with docs)
+    messages = []
+    for msg in prior_messages:
+        role = "user" if isinstance(msg, HumanMessage) else "assistant"
+        messages.append({"role": role, "content": str(msg.content)})
+    messages.append({
+        "role": "user",
+        "content": [
+            {
+                "type": "text",
+                "text": f"Document excerpts:\n\n{context}",
+                "cache_control": {"type": "ephemeral"},
+            },
+            {
+                "type": "text",
+                "text": f"\n\nQuestion: {question}",
+            },
+        ],
+    })
 
     client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
     response = client.messages.create(
@@ -76,23 +117,10 @@ def _call_claude(question: str, chunks: list[dict], legislations: list[str]) -> 
             {
                 "type": "text",
                 "text": _system_prompt(legislations),
-                "cache_control": {"type": "ephemeral"},  # cache system prompt (~350 tokens)
+                "cache_control": {"type": "ephemeral"},
             }
         ],
-        messages=[{
-            "role": "user",
-            "content": [
-                {
-                    "type": "text",
-                    "text": f"Document excerpts:\n\n{context}",
-                    "cache_control": {"type": "ephemeral"},  # cache chunks (~2,650 tokens)
-                },
-                {
-                    "type": "text",
-                    "text": f"\n\nQuestion: {question}",  # question is never cached
-                },
-            ],
-        }],
+        messages=messages,
     )
     raw = response.content[0].text
     cache_read = response.usage.cache_read_input_tokens or 0
@@ -107,11 +135,18 @@ def _call_claude(question: str, chunks: list[dict], legislations: list[str]) -> 
     return result
 
 
-def _call_openai(question: str, chunks: list[dict], legislations: list[str]) -> dict:
+def _call_openai(
+    question: str,
+    chunks: list[dict],
+    legislations: list[str],
+    prior_messages: list | None = None,
+) -> dict:
     from openai import OpenAI
+    prior_messages = prior_messages or []
     print(f"[llm] Calling OpenAI (gpt-4o-mini) for legislations {legislations}...")
     context = _build_context(chunks)
-    user_message = f"Document excerpts:\n\n{context}\n\nQuestion: {question}"
+    history_preamble = _format_history_for_openai(prior_messages)
+    user_message = f"{history_preamble}Document excerpts:\n\n{context}\n\nQuestion: {question}"
     print(f"[llm] Prompt size: ~{len(user_message.split())} words")
 
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -131,9 +166,24 @@ def _call_openai(question: str, chunks: list[dict], legislations: list[str]) -> 
     return result
 
 
-def get_response(question: str, chunks: list[dict], legislations: list[str]) -> dict:
+def get_response(
+    question: str,
+    chunks: list[dict],
+    legislations: list[str],
+    session_id: str | None = None,
+) -> dict:
+    from history import load_recent, save_exchange
+
+    prior_messages = load_recent(session_id) if session_id else []
+
     provider = os.getenv("LLM_PROVIDER", "claude").lower()
     print(f"[llm] Provider: {provider}")
     if provider == "openai":
-        return _call_openai(question, chunks, legislations)
-    return _call_claude(question, chunks, legislations)
+        result = _call_openai(question, chunks, legislations, prior_messages)
+    else:
+        result = _call_claude(question, chunks, legislations, prior_messages)
+
+    if session_id:
+        save_exchange(session_id, question, result.get("answer", ""), legislations)
+
+    return result

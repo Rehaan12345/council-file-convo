@@ -111,6 +111,7 @@ def answer_question(
     question: str,
     legislations: list[str],
     branches: dict[str, list[str]] | None = None,
+    session_id: str | None = None,
 ) -> dict:
     """
     Query one or more legislation collections, merge results by relevance,
@@ -125,10 +126,15 @@ def answer_question(
     print(f"[rag] Query for legislations {leg_ids}: '{question}'" +
           (f" [branches: {branches}]" if branches else ""))
 
-    # App-level cache keyed on question + legislation set + branch selection
+    # App-level cache — skip when the session has history (each turn has unique context)
     key = _cache_key(question + "|legs:" + ",".join(leg_ids) + "|branches:" + branch_key,
                      "__multi__")
-    if key in _answer_cache:
+    use_cache = not session_id
+    if not use_cache and session_id:
+        from history import load_recent
+        use_cache = len(load_recent(session_id)) == 0  # cache only on first turn
+
+    if use_cache and key in _answer_cache:
         print(f"[rag] Cache HIT — returning stored answer (0 tokens used)")
         return _answer_cache[key]
 
@@ -169,10 +175,12 @@ def answer_question(
         print(f"  [{i+1}] {c['source']} — {len(c['text'].split())} words")
 
     print(f"[rag] Sending to LLM...")
-    result = get_response(question, chunks, leg_ids)
+    result = get_response(question, chunks, leg_ids, session_id=session_id)
 
-    _answer_cache[key] = result
-    for leg in leg_ids:
-        _answer_cache_legs.setdefault(leg, set()).add(key)
+    if use_cache:
+        _answer_cache[key] = result
+    if use_cache:
+        for leg in leg_ids:
+            _answer_cache_legs.setdefault(leg, set()).add(key)
     print(f"[rag] Answer stored in cache (cache size: {len(_answer_cache)} entries)")
     return result

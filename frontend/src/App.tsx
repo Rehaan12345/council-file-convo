@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import Message, { type MessageData } from "./components/Message";
 import StarterQuestions from "./components/StarterQuestions";
+import Sidebar, { type Session } from "./components/Sidebar";
 import "./App.css";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
@@ -26,13 +27,6 @@ interface HotSheetEntry {
   base_file: string;
   branch: string | null;
   title: string;
-  indexed: boolean;
-}
-
-interface HotSheetJob {
-  job_id: string;
-  status: string;
-  message: string;
 }
 
 export default function App() {
@@ -44,6 +38,10 @@ export default function App() {
   const [messages, setMessages] = useState<MessageData[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID());
+
+  // Sidebar session history
+  const [sessions, setSessions] = useState<Session[]>([]);
 
   // Add council file form
   const [addInput, setAddInput] = useState("");
@@ -73,12 +71,18 @@ export default function App() {
   const [hotSheetUrl, setHotSheetUrl] = useState("");
   const [hotSheetDate, setHotSheetDate] = useState("");
   const [hotSheetEntries, setHotSheetEntries] = useState<HotSheetEntry[]>([]);
-  const [hotSheetSelected, setHotSheetSelected] = useState<Set<string>>(new Set());
   const [hotSheetParsing, setHotSheetParsing] = useState(false);
   const [hotSheetParseError, setHotSheetParseError] = useState("");
-  const [hotSheetIngestJobs, setHotSheetIngestJobs] = useState<Record<string, HotSheetJob>>({});
-  const hotSheetJobsRef = useRef<Record<string, HotSheetJob>>({});
-  const hotSheetPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [hotSheetLoadError, setHotSheetLoadError] = useState("");
+
+  // ── Fetch session history for sidebar ─────────────────────────────────────
+  const fetchSessions = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/sessions`);
+      if (!res.ok) return;
+      setSessions(await res.json());
+    } catch { /* silent */ }
+  }, []);
 
   // ── Fetch available legislations from backend ──────────────────────────────
   const fetchLegislations = useCallback(async () => {
@@ -97,7 +101,8 @@ export default function App() {
 
   useEffect(() => {
     fetchLegislations();
-  }, [fetchLegislations]);
+    fetchSessions();
+  }, [fetchLegislations, fetchSessions]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -131,13 +136,14 @@ export default function App() {
   }, []);
 
   // ── Legislation selection ──────────────────────────────────────────────────
-  // Clicking a tab body: switch primary, reset context to just that tab, clear chat
+  // Clicking a tab body: switch primary, reset context to just that tab, clear chat + session
   function clickTab(leg: string) {
     if (leg === primaryLeg && contextLegs.length === 1) return;
     setPrimaryLeg(leg);
     setContextLegs([leg]);
     setMessages([]);
     setInput("");
+    setSessionId(crypto.randomUUID());
     setBranchDropdownOpen(null);
   }
 
@@ -174,6 +180,7 @@ export default function App() {
               .filter((l) => (branchSelection[l] ?? []).length > 0)
               .map((l) => [l, branchSelection[l]])
           ),
+          session_id: sessionId,
         }),
       });
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
@@ -182,6 +189,7 @@ export default function App() {
         ...prev,
         { role: "assistant", text: data.answer, sources: data.sources, followups: data.followups },
       ]);
+      fetchSessions(); // update sidebar after each exchange
     } catch {
       setMessages((prev) => [
         ...prev,
@@ -197,6 +205,36 @@ export default function App() {
       e.preventDefault();
       sendQuestion(input);
     }
+  }
+
+  // ── Sidebar session management ─────────────────────────────────────────────
+
+  function handleNewChat() {
+    setMessages([]);
+    setInput("");
+    setSessionId(crypto.randomUUID());
+  }
+
+  async function handleSelectSession(session: Session) {
+    try {
+      const res = await fetch(`${API_URL}/api/sessions/${session.session_id}/messages`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const loaded: MessageData[] = data.messages.map((m: { role: string; content: string }) => ({
+        role: m.role as "user" | "assistant",
+        text: m.content,
+      }));
+      setMessages(loaded);
+      setSessionId(session.session_id);
+      setInput("");
+    } catch { /* silent */ }
+  }
+
+  async function handleDeleteSession(sessionId: string) {
+    try {
+      await fetch(`${API_URL}/api/sessions/${sessionId}`, { method: "DELETE" });
+      fetchSessions();
+    } catch { /* silent */ }
   }
 
   // ── Add council file ───────────────────────────────────────────────────────
@@ -283,6 +321,7 @@ export default function App() {
           setPrimaryLeg(switchTo);
           setContextLegs([switchTo]);
           setMessages([]);
+          setSessionId(crypto.randomUUID());
           // Hide status bar after 4s
           setTimeout(() => setIngestJob(null), 4000);
         } else if (job.status === "error") {
@@ -328,60 +367,19 @@ export default function App() {
   // Cleanup polling on unmount
   useEffect(() => () => {
     if (pollRef.current) clearInterval(pollRef.current);
-    if (hotSheetPollRef.current) clearInterval(hotSheetPollRef.current);
   }, []);
 
   // ── Hot Sheet ──────────────────────────────────────────────────────────────
-  function updateHotSheetJob(fullId: string, update: Partial<HotSheetJob>) {
-    hotSheetJobsRef.current = {
-      ...hotSheetJobsRef.current,
-      [fullId]: { ...(hotSheetJobsRef.current[fullId] ?? { job_id: "", status: "", message: "" }), ...update },
-    };
-    setHotSheetIngestJobs({ ...hotSheetJobsRef.current });
-  }
 
-  async function pollHotSheetJobs() {
-    const jobs = hotSheetJobsRef.current;
-    const active = Object.entries(jobs).filter(([, j]) => j.status !== "done" && j.status !== "error");
-    if (active.length === 0) {
-      clearInterval(hotSheetPollRef.current!);
-      hotSheetPollRef.current = null;
-      return;
-    }
-    await Promise.all(
-      active.map(async ([fullId, job]) => {
-        try {
-          const res = await fetch(`${API_URL}/api/ingest/status/${job.job_id}`);
-          if (!res.ok) return;
-          const updated = await res.json();
-          updateHotSheetJob(fullId, { status: updated.status, message: updated.message });
-          if (updated.status === "done") {
-            // Mark entry as indexed and auto-select it
-            setHotSheetEntries((prev) =>
-              prev.map((e) => (e.full_id === fullId ? { ...e, indexed: true } : e))
-            );
-            setHotSheetSelected((prev) => new Set([...prev, fullId]));
-            fetchLegislations();
-          }
-        } catch { /* keep polling */ }
-      })
-    );
-  }
-
-  function startHotSheetPoll() {
-    if (hotSheetPollRef.current) return;
-    hotSheetPollRef.current = setInterval(pollHotSheetJobs, 2000);
-  }
-
+  /** Parse: just fetch the entry list from the backend — no ingesting yet. */
   async function handleHotSheetParse(e: React.FormEvent) {
     e.preventDefault();
     if (!hotSheetUrl.trim()) return;
     setHotSheetParsing(true);
     setHotSheetParseError("");
+    setHotSheetLoadError("");
     setHotSheetEntries([]);
-    setHotSheetSelected(new Set());
-    setHotSheetIngestJobs({});
-    hotSheetJobsRef.current = {};
+    setHotSheetDate("");
     try {
       const res = await fetch(`${API_URL}/api/hot-sheet/parse`, {
         method: "POST",
@@ -395,14 +393,16 @@ export default function App() {
       }
       const data = await res.json();
       setHotSheetDate(data.date || "");
-      const indexedSet = new Set<string>(data.indexed as string[]);
-      const entries: HotSheetEntry[] = (data.entries as HotSheetEntry[]).map((entry) => ({
-        ...entry,
-        indexed: indexedSet.has(entry.base_file),
-      }));
+      // Deduplicate by base_file — hot sheet shows one entry per base file
+      const seen = new Set<string>();
+      const entries: HotSheetEntry[] = [];
+      for (const e of data.entries as HotSheetEntry[]) {
+        if (!seen.has(e.full_id)) {
+          seen.add(e.full_id);
+          entries.push(e);
+        }
+      }
       setHotSheetEntries(entries);
-      // Auto-select already-indexed entries
-      setHotSheetSelected(new Set(entries.filter((e) => e.indexed).map((e) => e.full_id)));
     } catch {
       setHotSheetParseError("Could not reach the server");
     } finally {
@@ -410,57 +410,34 @@ export default function App() {
     }
   }
 
-  async function ingestHotSheetEntry(entry: HotSheetEntry) {
+  /** Load: download + index the entire hot sheet as one collection. */
+  async function handleHotSheetLoad() {
+    if (hotSheetEntries.length === 0) return;
+    setHotSheetLoadError("");
     try {
-      const res = await fetch(`${API_URL}/api/ingest`, {
+      const res = await fetch(`${API_URL}/api/hot-sheet/load`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ council_file: entry.full_id, load_all_branches: false }),
+        body: JSON.stringify({ date: hotSheetDate, entries: hotSheetEntries }),
       });
       if (!res.ok) {
         const body = await res.json();
-        updateHotSheetJob(entry.full_id, { job_id: "", status: "error", message: body.detail || "Failed to start" });
+        setHotSheetLoadError(body.detail || "Failed to start load");
         return;
       }
-      const { job_id } = await res.json();
-      updateHotSheetJob(entry.full_id, { job_id, status: "downloading", message: "Starting download…" });
-      startHotSheetPoll();
+      const { job_id, hs_id } = await res.json();
+      setIngestJob({ job_id, status: "downloading", message: `Starting hot sheet load…` });
+      setHotSheetOpen(false);   // close panel; status bar in header shows progress
+      startPolling(job_id, hs_id);
     } catch {
-      updateHotSheetJob(entry.full_id, { job_id: "", status: "error", message: "Could not reach the server" });
+      setHotSheetLoadError("Could not reach the server");
     }
-  }
-
-  function openHotSheetChat() {
-    const selectedEntries = hotSheetEntries.filter(
-      (e) => hotSheetSelected.has(e.full_id) && e.indexed
-    );
-    if (selectedEntries.length === 0) return;
-
-    const newContextLegs: string[] = [];
-    const newBranchSel: Record<string, string[]> = {};
-    for (const entry of selectedEntries) {
-      if (!newContextLegs.includes(entry.base_file)) {
-        newContextLegs.push(entry.base_file);
-      }
-      if (entry.branch) {
-        newBranchSel[entry.base_file] = [
-          ...(newBranchSel[entry.base_file] ?? []),
-          entry.branch,
-        ];
-      }
-    }
-
-    setContextLegs(newContextLegs);
-    setBranchSelection((prev) => ({ ...prev, ...newBranchSel }));
-    setPrimaryLeg(newContextLegs[0] ?? "");
-    setMessages([]);
-    setInput("");
-    setHotSheetOpen(false);
   }
 
   function closeHotSheet() {
     setHotSheetOpen(false);
     setHotSheetParseError("");
+    setHotSheetLoadError("");
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -468,7 +445,9 @@ export default function App() {
   const meta = {
     title: contextLegs.length > 1
       ? `${contextLegs.length} council files`
-      : `Council File ${primaryLeg}`,
+      : primaryLeg.startsWith("HS-")
+        ? (primaryLegData?.subtitle || `Hot Sheet ${primaryLeg.slice(3)}`)
+        : `Council File ${primaryLeg}`,
     subtitle: contextLegs.length > 1
       ? contextLegs.join(" · ")
       : (primaryLegData?.subtitle || "LA City Council legislation"),
@@ -482,6 +461,14 @@ export default function App() {
 
   return (
     <div className="app">
+      <Sidebar
+        sessions={sessions}
+        activeSessionId={sessionId}
+        onNewChat={handleNewChat}
+        onSelectSession={handleSelectSession}
+        onDeleteSession={handleDeleteSession}
+      />
+      <div className="main-panel">
       <header className="app-header">
         <div className="header-inner">
           {/* ── Top row: title + add form ── */}
@@ -688,123 +675,45 @@ export default function App() {
             </form>
 
             {hotSheetParseError && <p className="hot-sheet-error">{hotSheetParseError}</p>}
+            {hotSheetLoadError && <p className="hot-sheet-error">{hotSheetLoadError}</p>}
 
-            {hotSheetEntries.length > 0 && (() => {
-              const indexedEntries = hotSheetEntries.filter((e) => e.indexed);
-              const unindexedEntries = hotSheetEntries.filter((e) => !e.indexed);
-              const readyCount = hotSheetEntries.filter(
-                (e) => hotSheetSelected.has(e.full_id) && e.indexed
-              ).length;
-              return (
-                <div className="hot-sheet-results">
-                  <div className="hot-sheet-summary">
-                    Found {hotSheetEntries.length} council files{hotSheetDate ? ` — ${hotSheetDate}` : ""}
-                  </div>
-
-                  <div className="hot-sheet-entries">
-                    {/* Already indexed */}
-                    {indexedEntries.length > 0 && (
-                      <div className="hot-sheet-group">
-                        <div className="hot-sheet-group-header hot-sheet-group-header--indexed">
-                          <span>✓ Already available ({indexedEntries.length})</span>
-                          <button
-                            className="hot-sheet-selectall"
-                            type="button"
-                            onClick={() =>
-                              setHotSheetSelected((prev) => {
-                                const next = new Set(prev);
-                                indexedEntries.forEach((e) => next.add(e.full_id));
-                                return next;
-                              })
-                            }
-                          >
-                            select all
-                          </button>
-                        </div>
-                        {indexedEntries.map((entry) => (
-                          <label key={entry.full_id} className="hot-sheet-entry">
-                            <input
-                              type="checkbox"
-                              checked={hotSheetSelected.has(entry.full_id)}
-                              onChange={() =>
-                                setHotSheetSelected((prev) => {
-                                  const next = new Set(prev);
-                                  next.has(entry.full_id) ? next.delete(entry.full_id) : next.add(entry.full_id);
-                                  return next;
-                                })
-                              }
-                            />
-                            <span className="hot-sheet-entry-id">{entry.full_id}</span>
-                            <span className="hot-sheet-entry-title">{entry.title}</span>
-                          </label>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Not yet indexed */}
-                    {unindexedEntries.length > 0 && (
-                      <div className="hot-sheet-group">
-                        <div className="hot-sheet-group-header hot-sheet-group-header--unindexed">
-                          <span>⬇ Not yet indexed ({unindexedEntries.length})</span>
-                        </div>
-                        {unindexedEntries.map((entry) => {
-                          const job = hotSheetIngestJobs[entry.full_id];
-                          const isActive = job && job.status !== "done" && job.status !== "error";
-                          const isDone = entry.indexed;
-                          return (
-                            <div
-                              key={entry.full_id}
-                              className={`hot-sheet-entry hot-sheet-entry--unindexed${isDone ? " hot-sheet-entry--done" : ""}`}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={hotSheetSelected.has(entry.full_id)}
-                                disabled={!isDone}
-                                onChange={() =>
-                                  setHotSheetSelected((prev) => {
-                                    const next = new Set(prev);
-                                    next.has(entry.full_id) ? next.delete(entry.full_id) : next.add(entry.full_id);
-                                    return next;
-                                  })
-                                }
-                              />
-                              <span className="hot-sheet-entry-id">{entry.full_id}</span>
-                              <span className="hot-sheet-entry-title">{entry.title}</span>
-                              {!job && !isDone && (
-                                <button
-                                  className="hot-sheet-load-btn"
-                                  type="button"
-                                  onClick={() => ingestHotSheetEntry(entry)}
-                                >
-                                  Load
-                                </button>
-                              )}
-                              {job && (
-                                <span className={`hot-sheet-job-status hot-sheet-job-status--${job.status}`}>
-                                  {job.status === "done" ? "✓" : job.status === "error" ? "✗" : "⏳"}{" "}
-                                  {isActive ? job.message : job.status === "done" ? "Ready" : job.message}
-                                </span>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="hot-sheet-footer">
-                    <button
-                      className="hot-sheet-open-btn"
-                      type="button"
-                      onClick={openHotSheetChat}
-                      disabled={readyCount === 0}
-                    >
-                      Open Chat with selected ({readyCount})
-                    </button>
-                  </div>
+            {hotSheetEntries.length > 0 && (
+              <div className="hot-sheet-results">
+                <div className="hot-sheet-summary">
+                  Found {hotSheetEntries.length} council files
+                  {hotSheetDate ? ` — ${hotSheetDate}` : ""}
                 </div>
-              );
-            })()}
+
+                <div className="hot-sheet-entries">
+                  {hotSheetEntries.slice(0, 10).map((entry) => (
+                    <div key={entry.full_id} className="hot-sheet-entry hot-sheet-entry--preview">
+                      <span className="hot-sheet-entry-id">{entry.full_id}</span>
+                      {entry.title && (
+                        <span className="hot-sheet-entry-title">{entry.title}</span>
+                      )}
+                    </div>
+                  ))}
+                  {hotSheetEntries.length > 10 && (
+                    <div className="hot-sheet-more">
+                      …and {hotSheetEntries.length - 10} more
+                    </div>
+                  )}
+                </div>
+
+                <div className="hot-sheet-footer">
+                  <button
+                    className="hot-sheet-open-btn"
+                    type="button"
+                    onClick={handleHotSheetLoad}
+                  >
+                    Load as "Hot Sheet {hotSheetDate || "today"}"
+                  </button>
+                  <span className="hot-sheet-footer-hint">
+                    All {hotSheetEntries.length} files will be searchable as branches
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -894,6 +803,7 @@ export default function App() {
           </button>
         </div>
       </footer>
+      </div>
     </div>
   );
 }

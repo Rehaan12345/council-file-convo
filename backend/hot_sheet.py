@@ -8,16 +8,38 @@ Example URL:
 Extraction strategy: regex on cfnumber= query params in <a href> links,
 then pair each with the nearest <strong>Title:</strong> that follows it.
 """
+import asyncio
 import re
+import subprocess
+from datetime import datetime
 from html import unescape
-
-import httpx
 
 # Matches cfnumber=XX-XXXX or cfnumber=XX-XXXX-SN (case-insensitive)
 _CF_RE = re.compile(r'cfnumber=([0-9]{2}-[0-9]{4}(?:-S\d+)?)', re.IGNORECASE)
 
 # Matches the title text immediately after <strong>Title:</strong>
 _TITLE_RE = re.compile(r'<strong[^>]*>\s*Title:\s*</strong>([^<]+)', re.IGNORECASE)
+
+_MONTH_MAP = {
+    "january": "01", "february": "02", "march": "03", "april": "04",
+    "may": "05", "june": "06", "july": "07", "august": "08",
+    "september": "09", "october": "10", "november": "11", "december": "12",
+}
+
+
+def date_to_hs_id(date: str) -> str:
+    """Convert a hot sheet date string to a legislation ID.
+
+    'May 19, 2026' → 'HS-2026-05-19'
+    Falls back to today's date if parsing fails.
+    """
+    m = re.match(r'(\w+)\s+(\d{1,2}),\s+(\d{4})', date.strip())
+    if m:
+        month = _MONTH_MAP.get(m.group(1).lower())
+        if month:
+            return f"HS-{m.group(3)}-{month}-{m.group(2).zfill(2)}"
+    return f"HS-{datetime.now().strftime('%Y-%m-%d')}"
+
 
 # Date pattern in the page header e.g. "May 19, 2026"
 _DATE_RE = re.compile(
@@ -44,12 +66,20 @@ async def fetch_and_parse(url: str) -> dict:
     }
     Entries are deduplicated by full_id and returned in document order.
     """
-    # verify=False: ens.lacity.org uses a CA not trusted by Python's bundled certs on macOS/Railway.
-    # This is safe here — we're only reading public HTML, not sending credentials.
-    async with httpx.AsyncClient(timeout=20, follow_redirects=True, verify=False) as client:
-        resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
-        resp.raise_for_status()
-    html = resp.text
+    # ens.lacity.org resets TLS connections from Python 3.13's OpenSSL.
+    # curl uses the system SSL stack and works reliably, so shell out to it.
+    def _fetch() -> str:
+        result = subprocess.run(
+            ["curl", "-s", "-L", "--insecure", "-A", "Mozilla/5.0",
+             "--max-time", "20", url],
+            capture_output=True, text=True, timeout=25,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"curl failed (exit {result.returncode}): {result.stderr.strip()}")
+        return result.stdout
+
+    loop = asyncio.get_event_loop()
+    html = await loop.run_in_executor(None, _fetch)
 
     # Extract date from page (first match)
     date_match = _DATE_RE.search(html)

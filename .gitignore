@@ -19,6 +19,10 @@ env/
 # ChromaDB (large binary index — rebuild locally with ingest.py)
 backend/chroma_db/
 
+# Runtime data files
+backend/chat_history.db
+backend/legislation_meta.json
+
 # Node
 frontend/node_modules/
 frontend/dist/
