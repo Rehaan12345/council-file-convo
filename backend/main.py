@@ -5,7 +5,7 @@ import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -80,6 +80,7 @@ class ChatRequest(BaseModel):
     legislations: list[str]               # one or more legislation IDs
     branches: dict[str, list[str]] = {}   # legislation_id → selected branches (empty = all)
     session_id: str | None = None         # opaque UUID from the frontend; enables memory
+    client_id: str = ""                   # browser-generated persistent ID for session scoping
 
 
 class ChatResponse(BaseModel):
@@ -432,7 +433,8 @@ def chat(req: ChatRequest):
         print(f"[chat] Branch filter: {branches}")
 
     result = rag.answer_question(question, legislations, branches=branches or None,
-                                 session_id=req.session_id or None)
+                                 session_id=req.session_id or None,
+                                 client_id=req.client_id)
     print(f"[chat] Returning answer ({len(result.get('answer',''))} chars), "
           f"{len(result.get('sources',[]))} sources, "
           f"{len(result.get('followups',[]))} followups")
@@ -444,9 +446,9 @@ def chat(req: ChatRequest):
 
 
 @app.get("/api/sessions")
-def list_sessions_endpoint():
+def list_sessions_endpoint(x_client_id: str | None = Header(default=None)):
     from history import list_sessions
-    return list_sessions()
+    return list_sessions(client_id=x_client_id or None)
 
 
 @app.get("/api/sessions/{session_id}/messages")

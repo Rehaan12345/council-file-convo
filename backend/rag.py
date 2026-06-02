@@ -132,6 +132,7 @@ def answer_question(
     legislations: list[str],
     branches: dict[str, list[str]] | None = None,
     session_id: str | None = None,
+    client_id: str = "",
 ) -> dict:
     """
     Query one or more legislation collections, merge results by relevance,
@@ -195,7 +196,7 @@ def answer_question(
         print(f"  [{i+1}] {c['source']} — {len(c['text'].split())} words")
 
     print(f"[rag] Sending to LLM...")
-    result = get_response(question, chunks, leg_ids, session_id=session_id)
+    result = get_response(question, chunks, leg_ids, session_id=session_id, client_id=client_id)
 
     if use_cache:
         _answer_cache[key] = result

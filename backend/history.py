@@ -29,9 +29,14 @@ def _ensure_sessions_table():
                 session_id      TEXT PRIMARY KEY,
                 title           TEXT,
                 legislation_ids TEXT NOT NULL DEFAULT '[]',
-                created_at      REAL NOT NULL
+                created_at      REAL NOT NULL,
+                client_id       TEXT NOT NULL DEFAULT ''
             )
         """))
+        # Migrate existing databases that lack the client_id column
+        cols = [row[1] for row in conn.execute(text("PRAGMA table_info(sessions)")).fetchall()]
+        if "client_id" not in cols:
+            conn.execute(text("ALTER TABLE sessions ADD COLUMN client_id TEXT NOT NULL DEFAULT ''"))
         conn.commit()
 
 
@@ -52,6 +57,7 @@ def save_exchange(
     question: str,
     answer: str,
     legislation_ids: list[str] | None = None,
+    client_id: str = "",
 ) -> None:
     h = get_history(session_id)
     h.add_user_message(question)
@@ -60,24 +66,34 @@ def save_exchange(
     with _engine.connect() as conn:
         conn.execute(
             text(
-                "INSERT OR IGNORE INTO sessions (session_id, title, legislation_ids, created_at) "
-                "VALUES (:sid, :title, :legs, :ts)"
+                "INSERT OR IGNORE INTO sessions (session_id, title, legislation_ids, created_at, client_id) "
+                "VALUES (:sid, :title, :legs, :ts, :cid)"
             ),
             {"sid": session_id, "title": question[:120],
-             "legs": json.dumps(legislation_ids or []), "ts": time.time()},
+             "legs": json.dumps(legislation_ids or []), "ts": time.time(),
+             "cid": client_id},
         )
         conn.commit()
 
 
-def list_sessions() -> list[dict]:
-    """Return all sessions ordered newest-first."""
+def list_sessions(client_id: str | None = None) -> list[dict]:
+    """Return sessions ordered newest-first, scoped to client_id when provided."""
     with _engine.connect() as conn:
-        rows = conn.execute(
-            text(
-                "SELECT session_id, title, legislation_ids, created_at "
-                "FROM sessions ORDER BY created_at DESC"
-            )
-        ).fetchall()
+        if client_id:
+            rows = conn.execute(
+                text(
+                    "SELECT session_id, title, legislation_ids, created_at "
+                    "FROM sessions WHERE client_id = :cid ORDER BY created_at DESC"
+                ),
+                {"cid": client_id},
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                text(
+                    "SELECT session_id, title, legislation_ids, created_at "
+                    "FROM sessions ORDER BY created_at DESC"
+                )
+            ).fetchall()
     return [
         {
             "session_id": r[0],

@@ -190,6 +190,7 @@ def get_response(
     chunks: list[dict],
     legislations: list[str],
     session_id: str | None = None,
+    client_id: str = "",
 ) -> dict:
     from history import load_recent, save_exchange
 
@@ -203,6 +204,6 @@ def get_response(
         result = _call_claude(question, chunks, legislations, prior_messages)
 
     if session_id:
-        save_exchange(session_id, question, result.get("answer", ""), legislations)
+        save_exchange(session_id, question, result.get("answer", ""), legislations, client_id=client_id)
 
     return result

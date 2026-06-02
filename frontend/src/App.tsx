@@ -38,6 +38,13 @@ export default function App() {
   const [messages, setMessages] = useState<MessageData[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [clientId] = useState<string>(() => {
+    const stored = localStorage.getItem("clientId");
+    if (stored) return stored;
+    const id = crypto.randomUUID();
+    localStorage.setItem("clientId", id);
+    return id;
+  });
   const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID());
 
   // Sidebar
@@ -79,11 +86,13 @@ export default function App() {
   // ── Fetch session history for sidebar ─────────────────────────────────────
   const fetchSessions = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/api/sessions`);
+      const res = await fetch(`${API_URL}/api/sessions`, {
+        headers: { "X-Client-ID": clientId },
+      });
       if (!res.ok) return;
       setSessions(await res.json());
     } catch { /* silent */ }
-  }, []);
+  }, [clientId]);
 
   // ── Fetch available legislations from backend ──────────────────────────────
   const fetchLegislations = useCallback(async () => {
@@ -183,6 +192,7 @@ export default function App() {
               .map((l) => [l, branchSelection[l]])
           ),
           session_id: sessionId,
+          client_id: clientId,
         }),
       });
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
@@ -222,7 +232,9 @@ export default function App() {
     if (loading) return;
     setSidebarOpen(false);
     try {
-      const res = await fetch(`${API_URL}/api/sessions/${session.session_id}/messages`);
+      const res = await fetch(`${API_URL}/api/sessions/${session.session_id}/messages`, {
+        headers: { "X-Client-ID": clientId },
+      });
       if (!res.ok) return;
       const data = await res.json();
       const loaded: MessageData[] = data.messages.map((m: { role: string; content: string }) => ({
@@ -237,7 +249,10 @@ export default function App() {
 
   async function handleDeleteSession(sessionId: string) {
     try {
-      await fetch(`${API_URL}/api/sessions/${sessionId}`, { method: "DELETE" });
+      await fetch(`${API_URL}/api/sessions/${sessionId}`, {
+        method: "DELETE",
+        headers: { "X-Client-ID": clientId },
+      });
       fetchSessions();
     } catch { /* silent */ }
   }
