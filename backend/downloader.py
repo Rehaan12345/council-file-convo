@@ -1,33 +1,44 @@
 """
-Downloads PDFs for a council file from the scrape-cf API and extracts them
-locally so ingest.py can index them.
+Downloads PDFs for a council file directly from the LA City Clerk's online
+records and saves them locally so ingest.py can index them.
+
+Each council file has a record page that links its PDFs from /onlinedocs/:
+  https://cityclerk.lacity.org/lacityclerkconnect/index.cfm?fa=ccfi.viewrecord&cfnumber=19-0036
+A non-existent file (or branch) returns the page with zero PDF links.
 
 Supports two modes:
   - Single file:  download_and_extract("22-0100", ...)
   - All branches: download_all_branches("26-0900", last_branch=15, ...)
-                  → extracts each Sx into DOCS_PATH/26-0900/26-0900-Sx/
+                  → saves each Sx into DOCS_PATH/26-0900/26-0900-Sx/
 """
 import asyncio
-import io
-import zipfile
+import re
 from pathlib import Path
 
 import httpx
 
-SCRAPE_API = "https://scrape-cf.vercel.app"
+CFMS_BASE = "https://cityclerk.lacity.org"
+RECORD_URL = CFMS_BASE + "/lacityclerkconnect/index.cfm?fa=ccfi.viewrecord&cfnumber={cf}"
+_HEADERS = {"User-Agent": "Mozilla/5.0"}
+
+# Council file PDFs are linked as /onlinedocs/<year>/<name>.pdf
+_PDF_RE = re.compile(r"/onlinedocs/[^\"'\s]+?\.pdf", re.IGNORECASE)
+
+
+async def _fetch_pdf_urls(cf: str, client: httpx.AsyncClient) -> list[str]:
+    """Fetch the council file record page and return unique absolute PDF URLs."""
+    resp = await client.get(RECORD_URL.format(cf=cf), headers=_HEADERS)
+    resp.raise_for_status()
+    urls = [CFMS_BASE + path for path in _PDF_RE.findall(resp.text)]
+    return list(dict.fromkeys(urls))  # dedupe, preserve order
 
 
 async def probe_branch_exists(base_file: str, n: int) -> bool:
-    """Return True if {base_file}-Sn has PDFs, False if the API returns 404."""
+    """Return True if {base_file}-Sn has PDFs, False otherwise."""
     cf = f"{base_file}-S{n}"
-    url = f"{SCRAPE_API}/council-files/{cf}/pdf-links"
-    async with httpx.AsyncClient(timeout=15) as client:
+    async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
         try:
-            resp = await client.get(url)
-            if resp.status_code == 404:
-                return False
-            data = resp.json()
-            return data.get("unique_pdf_count", 0) > 0
+            return len(await _fetch_pdf_urls(cf, client)) > 0
         except Exception:
             return False
 
@@ -68,19 +79,6 @@ async def discover_last_branch(base_file: str, known_min: int, job_status: dict 
     return lo
 
 
-async def _extract_zip_to(zip_bytes: bytes, dest_folder: Path) -> int:
-    """Extract PDFs from a zip into dest_folder. Returns pdf count."""
-    dest_folder.mkdir(parents=True, exist_ok=True)
-    count = 0
-    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
-        for name in zf.namelist():
-            if name.lower().endswith(".pdf"):
-                pdf_name = Path(name).name
-                (dest_folder / pdf_name).write_bytes(zf.read(name))
-                count += 1
-    return count
-
-
 async def download_and_extract(
     council_file: str,
     docs_path: Path,
@@ -89,12 +87,11 @@ async def download_and_extract(
     job_status: dict | None = None,
 ) -> tuple[Path, int]:
     """
-    Download the zip of PDFs for `council_file` and extract into
+    Download every PDF linked from `council_file`'s record page into
     `dest_folder_override` if given, otherwise `docs_path / council_file /`.
 
     Returns (dest_folder, pdf_count).
     """
-    url = f"{SCRAPE_API}/council-files/{council_file}/pdfs"
     dest_folder = dest_folder_override or (docs_path / council_file)
     dest_folder.mkdir(parents=True, exist_ok=True)
 
@@ -105,22 +102,25 @@ async def download_and_extract(
 
     _set(f"Connecting to city clerk archive for {council_file}...")
 
-    zip_buffer = io.BytesIO()
-    async with httpx.AsyncClient(timeout=300) as client:
-        async with client.stream("GET", url) as response:
-            response.raise_for_status()
-            total = int(response.headers.get("content-length", 0))
-            downloaded = 0
-            async for chunk in response.aiter_bytes(chunk_size=65536):
-                zip_buffer.write(chunk)
-                downloaded += len(chunk)
-                if total:
-                    pct = int(downloaded / total * 100)
-                    _set(f"Downloading {council_file}... {pct}%")
+    async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
+        urls = await _fetch_pdf_urls(council_file, client)
+        if not urls:
+            _set(f"No PDFs found for {council_file}")
+            return dest_folder, 0
 
-    _set(f"Extracting PDFs for {council_file}...")
-    pdf_count = await _extract_zip_to(zip_buffer.getvalue(), dest_folder)
-    _set(f"Extracted {pdf_count} PDFs for {council_file}")
+        count = 0
+        for i, url in enumerate(urls, 1):
+            _set(f"Downloading {council_file}... {i}/{len(urls)}")
+            try:
+                resp = await client.get(url, headers=_HEADERS)
+                resp.raise_for_status()
+            except Exception as e:
+                print(f"[downloader] WARNING: failed to download {url}: {e}")
+                continue
+            (dest_folder / url.rsplit("/", 1)[-1]).write_bytes(resp.content)
+            count += 1
+
+    _set(f"Downloaded {count} PDFs for {council_file}")
     print(f"[downloader] Saved to {dest_folder}")
 
     if cleanup:
@@ -128,7 +128,7 @@ async def download_and_extract(
         shutil.rmtree(dest_folder)
         print(f"[downloader] Cleaned up {dest_folder}")
 
-    return dest_folder, pdf_count
+    return dest_folder, count
 
 
 async def download_all_branches(

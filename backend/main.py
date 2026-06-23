@@ -352,7 +352,7 @@ def ingest_status(job_id: str):
 @app.get("/api/check-branches/{council_file}")
 async def check_branches(council_file: str):
     """
-    Probe the scrape-cf API to see if S1 exists for this base council file.
+    Probe the city clerk records to see if S1 exists for this base council file.
     Strips any -Sx suffix so callers can pass either "14-1174" or "14-1174-S4".
     Returns {"has_branches": bool, "base_file": str}.
     """
