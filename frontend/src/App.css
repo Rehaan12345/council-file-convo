@@ -674,16 +674,16 @@
   cursor: default;
 }
 
-/* ─── Hot Sheet ──────────────────────────────────────────────────────────── */
+/* ─── Single PDF ─────────────────────────────────────────────────────────── */
 
-/* Header actions row: add-form + hot sheet button side by side */
+/* Header actions row: add-form + single PDF button side by side */
 .header-actions {
   display: flex;
   gap: 6px;
   align-items: center;
 }
 
-.hot-sheet-toggle-btn {
+.single-pdf-toggle-btn {
   padding: 6px 12px;
   border-radius: 8px;
   border: 1px solid #ddd;
@@ -696,24 +696,24 @@
   white-space: nowrap;
 }
 
-.hot-sheet-toggle-btn:hover {
+.single-pdf-toggle-btn:hover {
   background: #f0f0f0;
   border-color: #bbb;
 }
 
-.hot-sheet-toggle-btn--active {
+.single-pdf-toggle-btn--active {
   background: #1a1a1a;
   color: #fff;
   border-color: #1a1a1a;
 }
 
-.hot-sheet-toggle-btn--active:hover {
+.single-pdf-toggle-btn--active:hover {
   background: #333;
   border-color: #333;
 }
 
 /* Panel */
-.hot-sheet-panel {
+.single-pdf-panel {
   margin-top: 10px;
   padding: 12px;
   background: #f8f8f8;
@@ -721,13 +721,13 @@
   border-radius: 10px;
 }
 
-.hot-sheet-url-row {
+.single-pdf-url-row {
   display: flex;
   gap: 6px;
   align-items: center;
 }
 
-.hot-sheet-url-input {
+.single-pdf-url-input {
   flex: 1;
   border: 1px solid #ddd;
   border-radius: 8px;
@@ -740,15 +740,15 @@
   transition: border-color 0.15s;
 }
 
-.hot-sheet-url-input:focus {
+.single-pdf-url-input:focus {
   border-color: #999;
 }
 
-.hot-sheet-url-input:disabled {
+.single-pdf-url-input:disabled {
   opacity: 0.6;
 }
 
-.hot-sheet-parse-btn {
+.single-pdf-add-btn {
   padding: 6px 12px;
   border-radius: 8px;
   border: 1px solid #1a1a1a;
@@ -761,16 +761,16 @@
   transition: background 0.15s;
 }
 
-.hot-sheet-parse-btn:hover:not(:disabled) {
+.single-pdf-add-btn:hover:not(:disabled) {
   background: #333;
 }
 
-.hot-sheet-parse-btn:disabled {
+.single-pdf-add-btn:disabled {
   opacity: 0.45;
   cursor: default;
 }
 
-.hot-sheet-close-btn {
+.single-pdf-close-btn {
   padding: 6px 8px;
   border-radius: 8px;
   border: 1px solid #ddd;
@@ -782,106 +782,21 @@
   transition: background 0.15s, color 0.15s;
 }
 
-.hot-sheet-close-btn:hover {
+.single-pdf-close-btn:hover {
   background: #f0f0f0;
   color: #333;
 }
 
-.hot-sheet-error {
+.single-pdf-error {
   font-size: 12px;
   color: #c00;
   margin: 6px 0 0;
 }
 
-/* Results area */
-.hot-sheet-results {
-  margin-top: 10px;
-}
-
-.hot-sheet-summary {
-  font-size: 12px;
-  font-weight: 600;
-  color: #555;
-  margin-bottom: 8px;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-}
-
-.hot-sheet-entries {
-  max-height: 300px;
-  overflow-y: auto;
-  border: 1px solid #e4e4e4;
-  border-radius: 8px;
-  background: #fff;
-}
-
-/* Individual entry row (preview — no checkbox) */
-.hot-sheet-entry--preview {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 5px 10px;
-  font-size: 13px;
-  border-bottom: 1px solid #f5f5f5;
-}
-
-.hot-sheet-entry--preview:last-child {
-  border-bottom: none;
-}
-
-.hot-sheet-entry-id {
-  font-weight: 600;
-  white-space: nowrap;
-  flex-shrink: 0;
-  color: #1a1a1a;
-}
-
-.hot-sheet-entry-title {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: #777;
-  font-size: 12px;
-}
-
-.hot-sheet-more {
-  padding: 5px 10px;
+.single-pdf-hint {
   font-size: 12px;
   color: #aaa;
-  font-style: italic;
-}
-
-/* Footer */
-.hot-sheet-footer {
-  margin-top: 10px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-}
-
-.hot-sheet-open-btn {
-  padding: 7px 14px;
-  border-radius: 8px;
-  border: 1px solid #1a1a1a;
-  background: #1a1a1a;
-  color: #fff;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.15s;
-  white-space: nowrap;
-}
-
-.hot-sheet-open-btn:hover {
-  background: #333;
-  border-color: #333;
-}
-
-.hot-sheet-footer-hint {
-  font-size: 12px;
-  color: #aaa;
+  margin: 6px 0 0;
 }
 
 /* ─── Responsive ─────────────────────────────────────────────────────────── */
@@ -938,17 +853,13 @@ button, input, textarea, label {
     min-width: 0;
   }
 
-  .hot-sheet-toggle-btn {
+  .single-pdf-toggle-btn {
     font-size: 12px;
     padding: 6px 10px;
   }
 
-  .hot-sheet-url-input {
+  .single-pdf-url-input {
     font-size: 16px; /* prevent iOS zoom */
-  }
-
-  .hot-sheet-entries {
-    max-height: 220px;
   }
 
   .add-file-input {

@@ -27,6 +27,23 @@ DB_PATH = Path(os.getenv("DB_PATH", str(Path(__file__).parent / "chroma_db")))
 CF_PATTERN = re.compile(r"^\d{2}-\d{4}(-S\d+)?$")
 
 
+def derive_pdf_id(url: str) -> str:
+    """
+    Turn a direct PDF URL into a legislation ID for a single-PDF collection.
+
+    The ID must contain only hyphens (no underscores), because
+    rag.get_available_legislations() reverses a collection name by turning every
+    underscore back into a hyphen — so any underscore here would not round-trip.
+
+      .../onlinedocs/2014/14-1371-s13_rpt_03-07-25.pdf
+        → 'PDF-14-1371-s13-rpt-03-07-25'
+    """
+    filename = url.rsplit("/", 1)[-1].split("?")[0]
+    stem = re.sub(r"\.pdf$", "", filename, flags=re.IGNORECASE)
+    clean = re.sub(r"[^A-Za-z0-9]+", "-", stem).strip("-")[:50].strip("-")
+    return f"PDF-{clean}" if clean else "PDF-document"
+
+
 async def _auto_ingest_missing():
     """On startup: ingest any DOCS_PATH folders not yet in ChromaDB."""
     try:
@@ -90,6 +107,10 @@ class ChatResponse(BaseModel):
 
 
 class HotSheetRequest(BaseModel):
+    url: str
+
+
+class SinglePdfRequest(BaseModel):
     url: str
 
 
@@ -203,6 +224,41 @@ async def _run_ingest(job_id: str, council_file: str, load_all_branches: bool = 
         job["status"] = "error"
         job["message"] = f"Error: {str(e)}"
         print(f"[ingest-job:{job_id}] ERROR: {e}")
+
+
+async def _run_single_pdf(job_id: str, pdf_id: str, url: str):
+    """Background task: download one PDF from `url` and index it as its own collection."""
+    job = ingest_jobs[job_id]
+    try:
+        ef = embedding_functions.SentenceTransformerEmbeddingFunction(
+            model_name="all-MiniLM-L6-v2"
+        )
+        client = rag.get_chroma_client()
+        dest_folder = DOCS_PATH / pdf_id
+
+        job["status"] = "downloading"
+        job["message"] = f"Downloading PDF for {pdf_id}..."
+        print(f"[single-pdf:{job_id}] Downloading {url} into {dest_folder}")
+        _, pdf_count = await downloader.download_single_pdf(url, dest_folder, job)
+        if pdf_count == 0:
+            raise RuntimeError("No PDF could be downloaded from that URL")
+
+        job["status"] = "indexing"
+        job["message"] = "Indexing PDF into the search database..."
+        print(f"[single-pdf:{job_id}] Indexing {dest_folder}")
+        chunks_indexed = ingest_legislation(dest_folder, client, ef)
+
+        rag.invalidate_collection_cache(pdf_id)
+        job["council_file"] = pdf_id
+        job["status"] = "done"
+        job["message"] = f"Ready — {chunks_indexed} chunks indexed from 1 PDF"
+        print(f"[single-pdf:{job_id}] Done. {chunks_indexed} chunks indexed.")
+        leg_meta.generate_and_save_meta(pdf_id)
+
+    except Exception as e:
+        job["status"] = "error"
+        job["message"] = f"Error: {str(e)}"
+        print(f"[single-pdf:{job_id}] ERROR: {e}")
 
 
 async def _run_hot_sheet_load(job_id: str, hs_id: str, date: str, entries: list[dict]):
@@ -339,6 +395,36 @@ async def start_ingest(req: IngestRequest, background_tasks: BackgroundTasks):
     background_tasks.add_task(_run_ingest, job_id, council_file, req.load_all_branches)
     print(f"[ingest] Job {job_id} started for {council_file} (load_all_branches={req.load_all_branches})")
     return IngestStarted(job_id=job_id, council_file=council_file)
+
+
+@app.post("/api/single-pdf/load", response_model=IngestStarted)
+async def load_single_pdf(req: SinglePdfRequest, background_tasks: BackgroundTasks):
+    """Download one PDF from a direct URL and index it as its own collection."""
+    url = req.url.strip()
+    print(f"\n[single-pdf] Request to load PDF: '{url}'")
+
+    if not re.match(r"^https?://", url, re.IGNORECASE) or ".pdf" not in url.lower():
+        raise HTTPException(
+            status_code=400,
+            detail="Provide a direct link to a .pdf file (e.g. https://cityclerk.lacity.org/onlinedocs/.../file.pdf)",
+        )
+
+    pdf_id = derive_pdf_id(url)
+    existing = [l["id"] for l in rag.get_available_legislations()]
+    if pdf_id in existing:
+        raise HTTPException(status_code=409, detail=f"'{pdf_id}' is already loaded.")
+
+    job_id = str(uuid.uuid4())
+    ingest_jobs[job_id] = {
+        "job_id": job_id,
+        "council_file": pdf_id,
+        "status": "downloading",
+        "message": f"Starting download for {pdf_id}...",
+    }
+
+    background_tasks.add_task(_run_single_pdf, job_id, pdf_id, url)
+    print(f"[single-pdf] Job {job_id} started for {pdf_id}")
+    return IngestStarted(job_id=job_id, council_file=pdf_id)
 
 
 @app.get("/api/ingest/status/{job_id}", response_model=IngestStatus)

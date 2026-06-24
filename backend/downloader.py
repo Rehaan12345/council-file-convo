@@ -131,6 +131,38 @@ async def download_and_extract(
     return dest_folder, count
 
 
+async def download_single_pdf(
+    url: str,
+    dest_folder: Path,
+    job_status: dict | None = None,
+) -> tuple[Path, int]:
+    """
+    Download one specific PDF from a direct URL into `dest_folder`.
+    Used by the "Single PDF" flow where the user pastes a single onlinedocs link.
+
+    Returns (dest_folder, pdf_count) — pdf_count is 1 on success, 0 on failure.
+    """
+    dest_folder.mkdir(parents=True, exist_ok=True)
+
+    def _set(msg: str):
+        if job_status:
+            job_status["message"] = msg
+        print(f"[downloader] {msg}")
+
+    filename = url.rsplit("/", 1)[-1].split("?")[0]
+    _set(f"Downloading {filename}...")
+
+    async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
+        resp = await client.get(url, headers=_HEADERS)
+        resp.raise_for_status()
+        content = resp.content
+
+    (dest_folder / filename).write_bytes(content)
+    _set(f"Downloaded {filename}")
+    print(f"[downloader] Saved to {dest_folder}")
+    return dest_folder, 1
+
+
 async def download_all_branches(
     base_file: str,
     last_branch: int,

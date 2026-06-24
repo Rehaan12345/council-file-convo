@@ -22,13 +22,6 @@ interface IngestJob {
   message: string;
 }
 
-interface HotSheetEntry {
-  full_id: string;
-  base_file: string;
-  branch: string | null;
-  title: string;
-}
-
 export default function App() {
   const [legislations, setLegislations] = useState<Legislation[]>([]);
   // primaryLeg: which tab drives the header title and starter questions
@@ -74,14 +67,11 @@ export default function App() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // ── Hot Sheet state ────────────────────────────────────────────────────────
-  const [hotSheetOpen, setHotSheetOpen] = useState(false);
-  const [hotSheetUrl, setHotSheetUrl] = useState("");
-  const [hotSheetDate, setHotSheetDate] = useState("");
-  const [hotSheetEntries, setHotSheetEntries] = useState<HotSheetEntry[]>([]);
-  const [hotSheetParsing, setHotSheetParsing] = useState(false);
-  const [hotSheetParseError, setHotSheetParseError] = useState("");
-  const [hotSheetLoadError, setHotSheetLoadError] = useState("");
+  // ── Single PDF state ───────────────────────────────────────────────────────
+  const [pdfPanelOpen, setPdfPanelOpen] = useState(false);
+  const [pdfUrl, setPdfUrl] = useState("");
+  const [pdfError, setPdfError] = useState("");
+  const [pdfLoading, setPdfLoading] = useState(false);
 
   // ── Fetch session history for sidebar ─────────────────────────────────────
   const fetchSessions = useCallback(async () => {
@@ -389,84 +379,53 @@ export default function App() {
     if (pollRef.current) clearInterval(pollRef.current);
   }, []);
 
-  // ── Hot Sheet ──────────────────────────────────────────────────────────────
+  // ── Single PDF ─────────────────────────────────────────────────────────────
 
-  /** Parse: just fetch the entry list from the backend — no ingesting yet. */
-  async function handleHotSheetParse(e: React.FormEvent) {
+  /** Download + index one pasted PDF link as its own legislation. */
+  async function handleSinglePdfSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!hotSheetUrl.trim()) return;
-    setHotSheetParsing(true);
-    setHotSheetParseError("");
-    setHotSheetLoadError("");
-    setHotSheetEntries([]);
-    setHotSheetDate("");
+    const url = pdfUrl.trim();
+    if (!url) return;
+    setPdfLoading(true);
+    setPdfError("");
     try {
-      const res = await fetch(`${API_URL}/api/hot-sheet/parse`, {
+      const res = await fetch(`${API_URL}/api/single-pdf/load`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: hotSheetUrl.trim() }),
+        body: JSON.stringify({ url }),
       });
       if (!res.ok) {
         const body = await res.json();
-        setHotSheetParseError(body.detail || "Failed to parse hot sheet");
+        setPdfError(body.detail || "Failed to load PDF");
+        setPdfLoading(false);
         return;
       }
-      const data = await res.json();
-      setHotSheetDate(data.date || "");
-      // Deduplicate by base_file — hot sheet shows one entry per base file
-      const seen = new Set<string>();
-      const entries: HotSheetEntry[] = [];
-      for (const e of data.entries as HotSheetEntry[]) {
-        if (!seen.has(e.full_id)) {
-          seen.add(e.full_id);
-          entries.push(e);
-        }
-      }
-      setHotSheetEntries(entries);
+      const { job_id, council_file } = await res.json();
+      setIngestJob({ job_id, status: "downloading", message: "Starting PDF download…" });
+      setPdfPanelOpen(false);   // close panel; status bar in header shows progress
+      setPdfUrl("");
+      setPdfLoading(false);
+      startPolling(job_id, council_file);
     } catch {
-      setHotSheetParseError("Could not reach the server");
-    } finally {
-      setHotSheetParsing(false);
+      setPdfError("Could not reach the server");
+      setPdfLoading(false);
     }
   }
 
-  /** Load: download + index the entire hot sheet as one collection. */
-  async function handleHotSheetLoad() {
-    if (hotSheetEntries.length === 0) return;
-    setHotSheetLoadError("");
-    try {
-      const res = await fetch(`${API_URL}/api/hot-sheet/load`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ date: hotSheetDate, entries: hotSheetEntries }),
-      });
-      if (!res.ok) {
-        const body = await res.json();
-        setHotSheetLoadError(body.detail || "Failed to start load");
-        return;
-      }
-      const { job_id, hs_id } = await res.json();
-      setIngestJob({ job_id, status: "downloading", message: `Starting hot sheet load…` });
-      setHotSheetOpen(false);   // close panel; status bar in header shows progress
-      startPolling(job_id, hs_id);
-    } catch {
-      setHotSheetLoadError("Could not reach the server");
-    }
-  }
-
-  function closeHotSheet() {
-    setHotSheetOpen(false);
-    setHotSheetParseError("");
-    setHotSheetLoadError("");
+  function closePdfPanel() {
+    setPdfPanelOpen(false);
+    setPdfError("");
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
   const primaryLegData = legislations.find((l) => l.id === primaryLeg);
+  const isSpecialLeg = primaryLeg.startsWith("HS-") || primaryLeg.startsWith("PDF-");
   const meta = {
     title: contextLegs.length > 1
       ? `${contextLegs.length} council files`
-      : primaryLeg.startsWith("HS-")
-        ? (primaryLegData?.subtitle || `Hot Sheet ${primaryLeg.slice(3)}`)
+      : isSpecialLeg
+        ? (primaryLegData?.subtitle ||
+            (primaryLeg.startsWith("HS-") ? `Hot Sheet ${primaryLeg.slice(3)}` : "PDF document"))
         : `Council File ${primaryLeg}`,
     subtitle: contextLegs.length > 1
       ? contextLegs.join(" · ")
@@ -523,12 +482,12 @@ export default function App() {
                   </button>
                 </form>
                 <button
-                  className={`hot-sheet-toggle-btn${hotSheetOpen ? " hot-sheet-toggle-btn--active" : ""}`}
+                  className={`single-pdf-toggle-btn${pdfPanelOpen ? " single-pdf-toggle-btn--active" : ""}`}
                   type="button"
-                  onClick={() => (hotSheetOpen ? closeHotSheet() : setHotSheetOpen(true))}
-                  title="Load from Hot Sheet URL"
+                  onClick={() => (pdfPanelOpen ? closePdfPanel() : setPdfPanelOpen(true))}
+                  title="Add a single PDF by link"
                 >
-                  📋 Hot Sheet
+                  📄 Single PDF
                 </button>
               </div>
               {addError && <p className="add-file-error">{addError}</p>}
@@ -690,63 +649,27 @@ export default function App() {
           )}
         </div>
 
-        {/* ── Hot Sheet panel ── */}
-        {hotSheetOpen && (
-          <div className="hot-sheet-panel">
-            <form className="hot-sheet-url-row" onSubmit={handleHotSheetParse}>
+        {/* ── Single PDF panel ── */}
+        {pdfPanelOpen && (
+          <div className="single-pdf-panel">
+            <form className="single-pdf-url-row" onSubmit={handleSinglePdfSubmit}>
               <input
-                className="hot-sheet-url-input"
-                placeholder="Paste hot sheet URL…"
-                value={hotSheetUrl}
-                onChange={(e) => setHotSheetUrl(e.target.value)}
-                disabled={hotSheetParsing}
+                className="single-pdf-url-input"
+                placeholder="Paste a PDF link… e.g. https://cityclerk.lacity.org/onlinedocs/…/file.pdf"
+                value={pdfUrl}
+                onChange={(e) => { setPdfUrl(e.target.value); setPdfError(""); }}
+                disabled={pdfLoading}
               />
-              <button className="hot-sheet-parse-btn" type="submit" disabled={hotSheetParsing || !hotSheetUrl.trim()}>
-                {hotSheetParsing ? "Loading…" : "Parse"}
+              <button className="single-pdf-add-btn" type="submit" disabled={pdfLoading || !pdfUrl.trim()}>
+                {pdfLoading ? "Adding…" : "Add"}
               </button>
-              <button className="hot-sheet-close-btn" type="button" onClick={closeHotSheet}>✕</button>
+              <button className="single-pdf-close-btn" type="button" onClick={closePdfPanel}>✕</button>
             </form>
 
-            {hotSheetParseError && <p className="hot-sheet-error">{hotSheetParseError}</p>}
-            {hotSheetLoadError && <p className="hot-sheet-error">{hotSheetLoadError}</p>}
-
-            {hotSheetEntries.length > 0 && (
-              <div className="hot-sheet-results">
-                <div className="hot-sheet-summary">
-                  Found {hotSheetEntries.length} council files
-                  {hotSheetDate ? ` — ${hotSheetDate}` : ""}
-                </div>
-
-                <div className="hot-sheet-entries">
-                  {hotSheetEntries.slice(0, 10).map((entry) => (
-                    <div key={entry.full_id} className="hot-sheet-entry hot-sheet-entry--preview">
-                      <span className="hot-sheet-entry-id">{entry.full_id}</span>
-                      {entry.title && (
-                        <span className="hot-sheet-entry-title">{entry.title}</span>
-                      )}
-                    </div>
-                  ))}
-                  {hotSheetEntries.length > 10 && (
-                    <div className="hot-sheet-more">
-                      …and {hotSheetEntries.length - 10} more
-                    </div>
-                  )}
-                </div>
-
-                <div className="hot-sheet-footer">
-                  <button
-                    className="hot-sheet-open-btn"
-                    type="button"
-                    onClick={handleHotSheetLoad}
-                  >
-                    Load as "Hot Sheet {hotSheetDate || "today"}"
-                  </button>
-                  <span className="hot-sheet-footer-hint">
-                    All {hotSheetEntries.length} files will be searchable as branches
-                  </span>
-                </div>
-              </div>
-            )}
+            {pdfError && <p className="single-pdf-error">{pdfError}</p>}
+            <p className="single-pdf-hint">
+              Adds just this one PDF as its own document you can ask questions about.
+            </p>
           </div>
         )}
 
